@@ -1,0 +1,244 @@
+# Copyright (C) 2001-2004 Institute of Physical Biology,
+#                    Heinrich-Heine Universität Düsseldorf, Germany
+#                    <construct@biophys.uni-duesseldorf.de>
+#  
+# This file is free software; as a special exception the author gives
+# unlimited permission to copy and/or distribute it, with or without 
+# modifications, as long as this notice is preserved.
+# 
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+CVS $Id: configure.in,v 1.41 2007-10-22 10:43:18 steger Exp $
+
+
+AC_INIT(src/cs_wish/main.c)
+AM_INIT_AUTOMAKE(construct, 3.2.5)
+# version changed should applied below (*_VERSION) too
+AM_CONFIG_HEADER(config.h)
+
+PACKAGE=construct
+# version changed should applied above (AM_INIT_AUTOMAKE) too
+MAJOR_VERSION=3
+MINOR_VERSION=2
+PATCHLEVEL=5
+VERSION=${MAJOR_VERSION}.${MINOR_VERSION}.${PATCHLEVEL}
+NODOT_VERSION=${MAJOR_VERSION}_${MINOR_VERSION}_${PATCHLEVEL}
+
+
+AC_SUBST(PACKAGE)
+AC_SUBST(VERSION)
+AC_SUBST(NODOT_VERSION)
+
+
+
+# fixme
+# next line just there to fix:
+# autoheader2.50: missing template: STATIC_BUILD
+# Use AC_DEFINE([STATIC_BUILD], [], [Description])- automake.
+#
+#AH_TEMPLATE(STATIC_BUILD, "do not know, fixme")
+
+AC_PROG_INSTALL
+AC_PROG_MAKE_SET
+AC_PROG_RANLIB
+AC_PROG_LN_S
+AC_ENABLE_SHARED
+AM_PROG_LIBTOOL 
+
+
+
+# FIXME use host_os
+OSNAME="`uname -s`"
+
+
+
+#------------------------------------------------------------------------------
+#-----------------------      TCL-CONFIG      ---------------------------------
+#------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------
+# "cygpath" is used on windows to generate native path names for include
+# files.
+# These variables should only be used with the compiler and linker since
+# they generate native path names.
+#
+# Unix tclConfig.sh points SRC_DIR at the top-level directory of
+# the Tcl sources, while the Windows tclConfig.sh points SRC_DIR at
+# the win subdirectory.  Hence the different usages of SRC_DIR below.
+#
+# This must be done before calling SC_PUBLIC_TCL_HEADERS
+#--------------------------------------------------------------------
+
+#AC_MSG_CHECKING([for Tcl version >= 8.4])
+#AC_CHECK_VERSION(${TCL_VERSION}, 8.4, AC_MSG_RESULT(yes), AC_MSG_ERROR([Tcl version >= 8.4 required.]))
+
+# tclsh
+AC_PATH_PROG(TCLSH, tclsh, no)
+if test x$tclsh = xno
+ then
+  AC_MSG_ERROR("Could not find tclsh.")
+fi
+
+
+# FIXME use host_os
+case "$OSNAME" in
+    *win32* | *WIN32* | *CYGWIN_NT*)
+	CYGPATH="cygpath -w"
+    ;;
+    *)
+	CYGPATH=echo
+    ;;
+esac
+AC_SUBST(CYGPATH)
+
+
+
+SC_PATH_TCLCONFIG
+SC_LOAD_TCLCONFIG
+
+SC_PATH_TKCONFIG
+SC_LOAD_TKCONFIG
+
+SC_PATH_X
+
+# needed? AC_ENABLE_SHARED used above
+#SC_ENABLE_SHARED
+
+AC_SUBST(TCL_CC)
+AC_SUBST(TK_XINCLUDES)
+
+
+### next two test make sure, that includes are only passed
+#   as TCL_INCLUDE_SPEC and TK_INCLUDE_SPEC
+
+###  test tcl includes
+#
+# construct TCL_INCLUDE_SPEC out of TCL_INCLUDE_SPEC and TCL_INC_DIR
+#
+if test x"${TCL_INCLUDE_SPEC}" == x ; then
+   TCL_INCLUDE_SPEC=-I.
+    if test x"${TCL_INC_DIR}" == x ; then
+        AC_MSG_WARN("Could not find tcl includes")
+    else
+        TCL_INCLUDE_SPEC=-I${TCL_INC_DIR}
+    fi
+fi
+AC_SUBST(TCL_INCLUDE_SPEC)
+
+
+###  test tk includes
+#
+if test x"${TK_INCLUDE_SPEC}" == x ; then
+   TK_INCLUDE_SPEC=-I.
+    if test x"${TK_INC_DIR}" == x ; then
+        AC_MSG_WARN("Could not find Tk includes")
+    else
+        TK_INCLUDE_SPEC=-I${TK_INC_DIR}
+    fi
+fi
+AC_SUBST(TK_INCLUDE_SPEC)
+
+
+# flags
+#AC_SUBST(TCL_DEFS)
+#AC_SUBST(TK_DEFS)
+AC_SUBST(TCL_CFLAGS_WARNING)
+AC_SUBST(TCL_CFLAGS_OPTIMIZE)
+AC_SUBST(TCL_SHLIB_CFLAGS)
+# libs
+AC_SUBST(TCL_LIB_SPEC)
+AC_SUBST(TCL_LIBS)
+AC_SUBST(TK_LIB_SPEC)
+AC_SUBST(TK_LIBS)
+AC_SUBST(LIBS)
+AC_SUBST(TCL_STUB_LIB_SPEC)
+AC_SUBST(TK_STUB_LIB_SPEC)
+# ldflags
+AC_SUBST(TCL_LD_FLAGS)
+AC_SUBST(TCL_LDFLAGS_OPTIMIZE)
+# misc...doesn't work? drawstructu lib extension missing
+AC_SUBST(TCL_SHLIB_SUFFIX)
+#AC_SUBST(SHLIB_SUFFIX)
+
+
+
+#------------------------------------------------------------------------------
+#------------------      LIBRARIES / EXT PROGRAMS  ----------------------------
+#------------------------------------------------------------------------------
+
+
+# libz-check
+AC_CHECK_LIB(z, gzread,, AC_MSG_WARN([*** libz not found: compression of data files not supported]))
+
+# math-check (for tcl done via tcl.m4, but essential for tinoco)
+AC_CHECK_LIB(m, exp,, AC_MSG_ERROR([Could not find libm.]))
+
+# nice
+AC_CHECK_PROG(HAVE_NICE, nice, true, false)
+if test "x$HAVE_NICE" = "xfalse"; then
+	AC_MSG_ERROR([required program nice not found])
+fi
+
+# RNAfold
+AC_CHECK_PROG(HAVE_RNAFOLD, RNAfold, true, false)
+if test "x$HAVE_RNAFOLD" = "xfalse"; then
+	AC_MSG_WARN([*** recommended program RNAfold not found. cs_fold can only use tinoco!])
+fi
+
+# gzip for RNAfold postscripts
+AC_CHECK_PROG(HAVE_GZIP, gzip, true, false)
+if test "x$HAVE_GZIP" = "xfalse"; then
+	AC_MSG_WARN([*** recommended program gzip not found])
+fi
+
+#------------------------------------------------------------------------------
+#---------------------      MAC OS X SPECIFIC   -------------------------------
+#------------------------------------------------------------------------------
+
+# suppress apple's gcc specific support for precompiled headers
+# AC_CANONICAL_HOST
+# echo "DEBUG: host_os=$host_os "
+
+MACOS_CFLAG=""
+case "$host_os" in
+    darwin* | rhapsody*)
+    MACOS_CFLAG=-no-cpp-precomp
+    ;;
+esac
+#echo "DEBUG: MACOS_CFLAG=$MACOS_CFLAG"
+AC_SUBST(MACOS_CFLAG)
+
+
+
+
+
+
+AC_OUTPUT([
+	Makefile
+    doc/Makefile
+    m4/Makefile
+    src/Makefile
+    src/cs_wish/Makefile
+    src/cs_wish/main.h
+    src/cs_lib/Makefile
+    src/drawstruct/Makefile
+    src/tinoco/Makefile
+    src/pixmaps/Makefile
+])
+
+eval _bindir=$(eval echo $bindir)
+eval _libdir=$(eval echo $libdir)
+eval _mandir=$(eval echo $mandir)
+eval _docdir=$(eval echo $docdir)
+
+AC_MSG_NOTICE(
+[
+Files will be installed in the following directories:
+  Executables:  $_bindir
+  Libraries:    $_libdir
+  Man pages:    $_mandir
+  Doc file:     $_docdir
+])

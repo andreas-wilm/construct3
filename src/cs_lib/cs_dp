@@ -1,0 +1,563 @@
+#!/bin/sh
+# the next line restarts using wish (emacs user:-*-tcl-*- ) \
+exec cs_wish "$0" -- "$@"
+# "--" bypasses all wish internal options, like visual etc.
+
+
+#
+#  CVS $Id: cs_dp,v 1.62 2007-10-22 10:43:23 steger Exp $
+#
+
+
+##############################################################################
+#
+# cs_dp - main gui dotplot procedures
+#
+# Copyright (C) 2001-2004 Institute of Physical Biology,
+#                    Heinrich-Heine Universität Düsseldorf, Germany
+#                    <construct@biophys.uni-duesseldorf.de>
+#
+# This file is part of ConStruct.
+#
+# ConStruct is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# ConStruct is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with ConStruct; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+###############################################################################
+
+
+
+
+###   InitCsDp   
+#
+#
+# Initialize cs_dp specific variables
+#
+proc InitCsDp {} {
+#############
+    global c                         ;# w
+    global SEQHEIGHT                 ;# w
+    global COLOR                     ;# w
+    global FONT                      ;# w
+    global scale                     ;# w
+    global selection                 ;# w
+    global alignment_is_modified     ;# w
+    global opts                      ;# w
+    global PS_WIDTH                  ;# w
+    global tcl_rcFileName
+    global mic_is_computed_and_valid
+    global IMG
+    global FILE_TYPES
+    global seqsearch_re
+
+
+	##########   Init non-user-changeable vars
+    #
+    #
+
+    set c(size)              [expr {double([winfo screenmmwidth .]/25)}];# screen size of canvas (in cm)
+    set c(virtual_size)      $c(size)
+#    set c(size)              15.0           ;# screen size of canvas (in cm)
+#    set c(virtual_size)      15.0
+    set SEQHEIGHT            0.8            ;# height of chars in aligned sequence-window
+
+    set COLOR(CDpBg)        "#E0FFFF"       ;# SkyBlue1:       dotplot background
+    set COLOR(SelSeq)       "#0000FF"       ;#                 dots of selected sequence
+    set COLOR(UnselSeq)     "#00CC00"       ;# MediumSeaGreen: not selected sequence
+    set COLOR(ActiveNt)     "#FFFF00"       ;# yellow:         highlighted alignment nt
+    set COLOR(UnactiveNt)   "#000000"       ;# Black :         normal nt in alignment and in sequence beneath dotplot
+    set COLOR(SelNtBox)     "#6495ED"       ;# CornFlowerBlue: selected nt range in alignment window
+    set COLOR(SelBp)        "#00FEFE"       ;# cyan:           selected bp in dotplot
+    set COLOR(UnselBp)      "#00CC00"       ;# MediumSeaGreen: normal bp in dotplot
+    set COLOR(AlnOptStruct) "#FF6600"       ;# opt struct in aln background
+
+    ### font formats; for available fonts see 'xfontsel'
+    #
+    #
+    set FONT(al,format)     "-adobe-courier-bold-r-normal--*-%d-0-0-m-0-iso8859-1"
+    set FONT(al_sn,format)  "-adobe-helvetica-bold-r-normal--*-%d-0-0-p-0-iso8859-1"
+
+    set FONT(dp_nm,format)  "-adobe-helvetica-bold-r-normal--*-%d-0-0-p-0-iso8859-1"
+    set FONT(dp_nm,pt)	    100
+    set FONT(dp_seq,format) "-adobe-courier-bold-r-normal--*-%d-0-0-m-0-iso8859-1"
+
+
+    set scale(al)           0.5          ;# scaling of alignment window
+
+    # alignment regexp search
+    # init re : extrastable hairpins
+    set seqsearch_re(eshp_re)    {g.[agr]a|u.cg}
+    # init re mark color : orange
+    set seqsearch_re(cur_col)    "#FFA500"
+
+
+
+
+    ##########   Init user-changeable rc-vars
+    #            and possibly overwrite them by
+    #            sourcing the rc-file
+    #
+    ###   printing
+    #
+    #
+    set PS_WIDTH                   16    ;# width of print; between 5 and 18 cm
+    set opts(print_cmd,grey)       "lpr"
+    set opts(print_cmd,color)      ""
+
+    #    set opts(print_cmd,screen)     "gv -a4 -magstep -1 -"
+    set opts(print_cmd,screen)     "gv --media=a4 -"
+    set opts(print_cmd,colormode)  "color" ;# or gray or mono
+
+
+    set opts(displ,highlight_nt_from_csbp)  1
+    set opts(displ,show_rectangle)          1
+    set opts(displ,cons_bp)                 1
+    set opts(displ,gaps)                    1
+    set opts(displ,bps)                     1
+    set opts(displ,use_cons_seq)            1 ;# use consensus sequence for structure prediction
+                                              ;# use selected sequence otherwise
+
+    set opts(displ,remove_gaps)             0 ;# don't remove gaps for structure drawing
+    set opts(struct,allow_single_bp)        0
+
+    set opts(mic,factor)                    0.25
+    set opts(td,threshold)                  0.05
+    set opts(td,factor)                     0.75
+
+
+    set  opts(mic,unbiased)                 0    ;# unbiased or mlm
+    set  opts(mic,bit)                      0    ;# log_2 or log_e
+    set  opts(mic,pair_entropy_norm)        1    ;# pair_entropy_normalization
+    set  opts(mic,use_alifoldscore)   0    ;# use MIC or RNAalifold
+    set  opts(mic,use_stacking)       0    ;# RNAalifold incl stacking
+
+    # colormapping
+    set  opts(mic,oldColormap,0) 0.0
+    set  opts(mic,Colormap,0)    0.0
+    set  opts(mic,oldColormap,1) 1.0
+    set  opts(mic,Colormap,1)    1.0
+    set  opts(mic,limit,0)         7
+    set  opts(mic,limit,1)       135
+
+    # dotplot printing
+    set  opts(print_dp,rem_selection)   1
+    set  opts(print_dp,add_project)     1
+    set  opts(print_dp,add_sequence)    1
+    set  opts(print_dp,add_numbering)   1
+
+
+    # directories
+    set opts(dir,work)  [pwd]
+    set opts(dir,tmp)   "/tmp/"
+
+    # suboptimal structures
+    set opts(suboptstruct,number) 100
+
+
+	# mapping
+	set opts(mapping,use_in_dotplot)   1
+	set opts(mapping,use_in_structaln) 1
+
+    # struct_aln
+	set opts(structaln,show_seq_stat)    1
+	set opts(structaln,show_struct_stat) 1
+	set opts(structaln,show_patt_stat)   0
+
+    # this is actually automatically done on startup
+    # but we must source it again
+    # to overwrite the defaults with user defined values
+    #
+    if {[file exists $tcl_rcFileName]} {
+        source $tcl_rcFileName
+    }
+
+
+
+
+
+    #####   Setup Packages
+    #
+    #
+
+    InitImages
+
+    # fixme implement getenv if package load fails (also for other bins)
+
+
+    package require BalloonHelp
+
+
+    package require DrawStruct
+    #
+    if {[DrawStruct::Init]=="ERROR"} {
+        p::error "DrawStruct::Init failed"
+        exit
+    }
+    set DrawStruct::reset_img $IMG(reset)
+    set DrawStruct::zoom_img  $IMG(zoom)
+    set DrawStruct::print_pswidth   $PS_WIDTH
+
+
+
+    package require Circles
+    #
+    if {[Circles::Init]=="ERROR"} {
+        p::error "Circles::Init failed"
+        exit
+    }
+    set Circles::IMG_ZOOM $IMG(zoom)
+
+
+    package require StructAln
+    #
+    if {[StructAln::Init]=="ERROR"} {
+        p::error "StructAln::Init failed"
+        exit
+    }
+    set StructAln::PS_WIDTH $PS_WIDTH
+    set StructAln::filetypes_txt) $FILE_TYPES(txt)
+
+    #
+    # GetOpts and p are "required" via initcore
+    #
+
+
+    ###   3, 2, 1 ....
+    #
+    set selection(seq_no)      -1   ;# index of selected seq (unit-offset)
+    set selection(nt_low)      -1   ;# index of lower selected nt (unit-offset)
+    set selection(nt_high)     -1   ;# index of higher selected nt (unit-offset)
+    set selection(super_sel)    0   ;# boolean: more than one seq selected
+                                     # see also selection(super_sel,seq_indices)
+
+    set alignment_is_modified       0
+    set mic_is_computed_and_valid   0
+
+
+    ### ...go
+    #
+    CreateDpWindow
+
+    CreateDpMenu
+
+    ChangeMenuesState disabled
+
+    # FIXME implement rnamlwrite
+}
+# InitCsDp
+
+
+
+
+###   InitProj   
+#
+# called from core after project and alignment have been loaded
+#
+#
+proc InitProj {proj_file} {
+#############
+    global FONT      ;# w
+    global scale     ;# w
+    global c
+    global w         ;# r
+    global seq       ;# w
+    global SEQHEIGHT
+    global opts      ;# w
+    global mic_is_computed_and_valid ;# w
+    global optstruct ;# w
+	global dp_hidden_objects ;# w
+	
+    set opts(dir,work)   [file dirname $proj_file]
+
+    set mic_is_computed_and_valid 0
+
+
+    #####   Import Sequences
+    #
+    # reentrance
+    catch {unset seq}
+    Seq_Exchange seq C2TCL
+
+
+    #####   Precomputed optimal structures
+    #
+    # load optimal structures if created by cs_fold
+    set file_os [GetOptStructFileName $proj_file]
+    if {[file exists $file_os]} {
+		p::verbose "Loading precomputed optimal structures from $file_os"
+		LoadPrecompOptStructs $file_os optstruct
+        set optstruct(loaded) 1
+    } else {
+        set optstruct(loaded) 0
+        p::verbose "no precomputed optimal structures found...loading skipped."
+    }
+
+
+    # in case this is a reload, rezoom
+    set zoomfac [expr {$c(size)/$c(virtual_size)}]
+    if {$zoomfac!=1} {
+        ZoomDotplot $zoomfac
+    }
+
+	catch {unset dp_hidden_objects}
+	set dp_hidden_objects(mapping) {}
+
+    ##### setup scale
+    #
+    #
+    set scale(dp) [expr {$c(size)/$seq(aln_len)}]
+    if {$scale(dp) < 0.5} {
+        set scale(al) 0.5;
+    } else {
+        set scale(al) $scale(dp)
+    }
+
+    ##### setup fonts
+    #
+    #
+    set FONT(al,pt)    [expr {int([expr {$scale(al)*100.0/2.54*10}])}]
+    set FONT(al_sn,pt) [expr {int([expr {$scale(al)*100.0/2.54*4.5}])}]
+    set FONT(al)       [format $FONT(al,format)    $FONT(al,pt)]
+    set FONT(al_sn)    [format $FONT(al_sn,format) $FONT(al_sn,pt)]
+
+    ChangeMenuesState normal
+
+    wm title $w(dp)  "ConStruct dotplot: $cs_proj::proj(name)"
+    #wm iconname $w(dp) "ConStruct"
+
+    ZoomDotplot 1.
+
+    Debugger "cs_dp"
+
+}
+# InitProj
+
+
+
+
+###   CsDp_Usage   
+#
+#
+proc CsDp_Usage {} {
+###############
+    puts "usage: [file tail $::argv0] \[-h -V | \[-v\] \[-d\] \[-t\] \[-f <file>\]\]"
+    puts "       -h: print this help and exit"
+    puts "       -V: print version and exit"
+    puts "       -v: be verbose"
+    puts "       -d: print debug messages"
+    puts "       -t: do timings"
+    puts "       -f <file>: load project file"
+    exit
+}
+# CsDp_Usage
+
+
+
+
+
+###   B4Exit   
+#
+#
+proc B4Exit {win} {
+###########
+    global w                       ;# w
+    global alignment_is_modified   ;# w
+
+
+
+    if {$alignment_is_modified} {
+        set    msg "Alignment was modified!\n"
+        append msg "Save before exit?"
+
+		set answer [tk_messageBox -parent . \
+                        -title   "Warning" \
+                        -type	 yesno      \
+                        -icon	 warning	\
+                        -message "$msg"]
+        if {$answer == "yes"} {
+            SaveAln
+        }
+    }
+
+    SaveRc
+
+    catch {destroy $w(dp)}
+    catch {destroy $w(al)}
+
+    exit
+}
+# exit B4Exit
+
+
+
+
+###   SaveRc   
+#
+# Save all use defined options to rc-File,
+# which will be sourced on startup
+#
+#
+proc SaveRc {} {
+###########
+    global tcl_rcFileName
+    global opts
+
+    set fid [open $tcl_rcFileName w+]
+
+    # greeting
+    #
+    puts $fid "###   ConStruct tcl_rc File   ###"
+    puts $fid "# Use the source, Luke"
+    puts $fid "# Feel free to edit"
+    puts $fid "\n\n"
+
+    # display
+    #
+    puts $fid "\n# display"
+    puts $fid "[format "set  opts(displ,highlight_nt_from_csbp) %d" $opts(displ,highlight_nt_from_csbp)]"
+    puts $fid "[format "set  opts(displ,show_rectangle)         %d" $opts(displ,show_rectangle)]"
+    puts $fid "[format "set  opts(displ,cons_bp)                %d" $opts(displ,cons_bp)]"
+    puts $fid "[format "set  opts(displ,gaps)                   %d" $opts(displ,gaps)]"
+    puts $fid "[format "set  opts(displ,bps)                    %d" $opts(displ,bps)]"
+    puts $fid "[format "set  opts(displ,use_cons_seq)           %d" $opts(displ,use_cons_seq)]"
+    puts $fid "[format "set  opts(displ,remove_gaps)            %d" $opts(displ,remove_gaps)]"
+
+    # computation base
+    #
+    puts $fid "\n# structure prediction / computation base"
+    puts $fid "[format "set  opts(td,threshold) %f" $opts(td,threshold)]"
+    puts $fid "# opts(mic,treshold) == opts(mic,limit,0) (colormapping)"
+    puts $fid "[format "set  opts(td,factor)             %f" $opts(td,factor)]"
+    puts $fid "[format "set  opts(mic,factor)            %f" $opts(mic,factor)]"
+    puts $fid "[format "set  opts(mic,unbiased)          %d" $opts(mic,unbiased)]"
+    puts $fid "[format "set  opts(mic,bit)               %d" $opts(mic,bit)]"
+    puts $fid "[format "set  opts(mic,pair_entropy_norm) %d" $opts(mic,pair_entropy_norm)]"
+    puts $fid "[format "set  opts(mic,use_alifoldscore)  %d" $opts(mic,use_alifoldscore)]"
+    puts $fid "[format "set  opts(mic,use_stacking)      %d" $opts(mic,use_stacking)]"
+    
+    # colormapping
+    #
+    puts $fid "\n# colormapping"
+    puts $fid "[format "set  opts(mic,oldColormap,0) %f" $opts(mic,oldColormap,0)]"
+    puts $fid "[format "set  opts(mic,Colormap,0)    %f" $opts(mic,Colormap,0)]"
+    puts $fid "[format "set  opts(mic,oldColormap,1) %f" $opts(mic,oldColormap,1)]"
+    puts $fid "[format "set  opts(mic,Colormap,1)    %f" $opts(mic,Colormap,1) ]"
+    puts $fid "[format "set  opts(mic,limit,0)       %d" $opts(mic,limit,0) ]"
+    puts $fid "[format "set  opts(mic,limit,1)       %d" $opts(mic,limit,1) ]"
+
+    # printing
+    #
+    puts $fid "\n# printing"
+    puts $fid "[format "set opts(print_cmd,grey)      \"%s\"" $opts(print_cmd,grey)]"
+    puts $fid "[format "set opts(print_cmd,color)     \"%s\"" $opts(print_cmd,color)]"
+    puts $fid "[format "set opts(print_cmd,screen)    \"%s\"" $opts(print_cmd,screen)]"
+    puts $fid "[format "set opts(print_cmd,colormode) \"%s\"" $opts(print_cmd,colormode)]"
+
+    # directories
+    #
+    puts $fid "\n# directories"
+    puts $fid "[format "set opts(dir,work)   \"%s\"" $opts(dir,work)]"
+    puts $fid "[format "set opts(dir,tmp)    \"%s\"" $opts(dir,tmp)]"
+
+    # dotplot printing
+    #
+    puts $fid "\n# dotplot printing"
+    puts $fid "[format "set opts(print_dp,rem_selection) %d" $opts(print_dp,rem_selection)]"
+    puts $fid "[format "set opts(print_dp,add_project)   %d" $opts(print_dp,add_project)]"
+    puts $fid "[format "set opts(print_dp,add_sequence)  %d" $opts(print_dp,add_sequence)]"
+    puts $fid "[format "set opts(print_dp,add_numbering) %d" $opts(print_dp,add_numbering)]"
+
+    # suboptimal structures
+    #
+    puts $fid "[format "set opts(suboptstruct,number) %d" $opts(suboptstruct,number)]"
+
+	# mapping
+	#
+    puts $fid "[format "set opts(mapping,use_in_dotplot)   %d" $opts(mapping,use_in_dotplot)]"
+    puts $fid "[format "set opts(mapping,use_in_structaln) %d" $opts(mapping,use_in_structaln)]"
+
+    # struct_aln
+	puts $fid "[format "set opts(structaln,show_seq_stat)    %d" $opts(structaln,show_seq_stat)]"
+	puts $fid "[format "set opts(structaln,show_struct_stat) %d" $opts(structaln,show_struct_stat)]"
+	puts $fid "[format "set opts(structaln,show_patt_stat)   %d" $opts(structaln,show_patt_stat)]"
+
+
+    # misc
+    #
+    puts $fid "[format "set opts(struct,allow_single_bp) %d" $opts(struct,allow_single_bp)]"
+
+    close $fid
+}
+# SaveRc
+
+
+
+
+###   main   
+
+
+
+
+###   parse command line
+#
+# v: verbose
+# d: debug
+# t: timer
+# f: project file
+#
+set opts(debug)   0
+set opts(verbose) 0
+while {[set err [getopt $argv "hVvdtf:" opt arg]]} {
+    if {$err<0} {
+        p::error "$arg"
+        CsDp_Usage
+    } else {
+        switch -exact $opt {
+            h {CsDp_Usage}
+            V {puts [Version]; exit}
+            v {set opts(verbose)   1}
+            d {set opts(debug)     1}
+            t {set opts(do_timing) 1}
+            f {set projfile   "$arg"}
+        }
+    }
+}
+p::be_verbose   $opts(verbose)
+p::enable_debug $opts(debug)
+
+
+InitCsDp
+
+
+# list of excluded online debugging tags
+# named as the resp. file
+set DEBUGGER_SKIP {}
+
+Debugger "cs_dp"
+
+
+
+### load project if requested
+#
+
+if {[info exists projfile]} {
+    if {![file exists $projfile]} {
+        set msg "Project file \"$projfile\" doesn't exist!"
+        tk_messageBox -message $msg -type ok -title "Error"
+    } else {
+        if {[LoadProject $projfile]!="success"} {
+            set msg "Failed to load project-file \"$projfile\"!"
+            tk_messageBox -message $msg -type ok -title "Error"
+        }
+    }
+}

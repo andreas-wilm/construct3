@@ -1,0 +1,719 @@
+#!/bin/sh
+# the next line restarts using wish (emacs user:-*-tcl-*- ) \
+exec cs_wish "$0" -- "$@"
+###############################################################################
+
+
+
+#
+#  CVS $Id: cs_proj_conv,v 1.5 2004-05-25 13:29:06 wilm Exp $    
+#
+
+##############################################################################
+# 
+# proj_conv - convert old project files (v2) to new ones (v3)
+#
+# Copyright (C) 2001-2004 Institute of Physical Biology,
+#                    Heinrich-Heine Universität Düsseldorf, Germany
+#                    <construct@biophys.uni-duesseldorf.de>
+#
+# This file is part of ConStruct.
+# 
+# ConStruct is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# ConStruct is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with ConStruct; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+# 
+###############################################################################
+
+
+
+
+###   cs_proj_v2   
+#
+# This file contains the ConStruct internal input/output routines
+# for the ConStruct project-file version 2
+#
+# For a list of namespace variables see below
+#
+# List of procedures (for docu see there):
+#
+#    Reading: (core read_complete_proj_file)
+#       proc read_method_cmdline {proj_file}
+#       proc read_proj_name {proj_file}
+#       proc read_sequence_filename {proj_file}
+#       proc read_weights {proj_file  weight_arrayname}
+#       proc read_matrix_filenames {proj_file  matrix_arrayname}
+#       proc read_complete_proj_file {proj_file  ... }
+#
+#
+#    Writing: (core write_complete_proj_file)
+#       proc write_version_string {proj_file_id}
+#       proc write_proj_name {proj_file_id}
+#       proc write_method_cmdline {proj_file_id}
+#       proc write_sequence_file {proj_file_id}
+#       proc write_matrix_filename_array {proj_file_id}
+#       proc write_weight_arrayname {proj_file_id}
+#
+#
+#    Misc:
+#       proc unset_all_values {} 
+#       proc init {}
+#		proc dump_values {}
+#
+
+
+namespace eval cs_proj_v2 {
+    
+    
+    
+    
+    
+    #>>>>>>>>>>>>>>>>>>>>> Namespace Variables And Options <<<<<<<<<<<<<<<<<<<#
+    #                           ( see proc init )                             #
+
+    # variable proj_filename   :    project file name
+    # variable proj_name       :    project name
+    # variable sequence_file   :    vienna sequence file
+    # variable num_seq         :    number of sequences 
+    # variable method_cmdline  :    command line for computing the \
+    #                               basepair-probability matrices
+    # variable matrix_filename :    filename array of the basepair-\
+    #                               probability matrices
+    # variable weight          :    array of sequence weights
+    # variable CS_VERSION      :    constant version string
+    # variable debug           :    boolean
+    
+    
+    
+
+    
+    
+    
+    ###########################################################################
+    #>>>>>>>>>>>>>>>>>>>>>>>>>                       <<<<<<<<<<<<<<<<<<<<<<<<<#
+    #>>>>>>>>>>>>>>>>>>>>>>>>>>>> Read Procedures <<<<<<<<<<<<<<<<<<<<<<<<<<<<#
+    #>>>>>>>>>>>>>>>>>>>>>>>>>                       <<<<<<<<<<<<<<<<<<<<<<<<<#
+    ###########################################################################
+    
+        
+        
+   
+    ###   read_method_cmdline   ###############################################
+    #
+    # returns the commandline used for computing the 
+    # basepair-probability matrices from proj_file
+    # or ERROR on failure
+    #
+    #
+    proc read_method_cmdline {proj_file} {
+
+        set f_id [open $proj_file r]
+        while { [gets $f_id line] >= 0 } {
+            if {[regsub {^!} $line "" cmdline]} {
+                break
+            }
+        }
+        close $f_id
+        
+        # got it ?
+        if { ! [info exists cmdline]} {
+            puts "ERROR: Couldn't find method command line in $proj_file"
+            return ERROR
+        }
+		
+        return [string trim $cmdline]
+        
+    };# exit read_method_cmdline
+    
+    
+    
+    
+    ###   read_proj_name   ####################################################
+    #
+    # returns the project name stored in proj_file
+    # or ERROR on failure
+    #
+    #
+    proc read_proj_name {proj_file} {
+    
+        set f_id [open $proj_file r]
+        while { [gets $f_id line] >= 0 } {
+            if {$line=="PROJECT"} {
+                gets $f_id projname
+                break
+            }
+        }
+        close $f_id
+        
+        # got it ?
+        if { ! [info exists projname]} {
+            puts "ERROR: Couldn't find project name in $proj_file"
+            return ERROR
+        }
+        return $projname
+        
+    };# exit read_proj_name
+    
+    
+
+    
+    ###   read_sequence_filename   ############################################
+    #
+    # returns the sequence filename stored in proj_file
+    # or ERROR on failure
+    #
+    #
+    proc read_sequence_filename {proj_file} {
+    
+        set f_id [open $proj_file r]
+        
+        while { [gets $f_id line] >= 0 } {
+            if {$line=="SEQUENCES"} {
+                gets $f_id seqfile
+                break
+            }
+        }
+        close $f_id
+        
+        # got it ?
+        if { ! [info exists seqfile]} {
+            puts "ERROR: Couldn't find project name in $proj_file"
+            return ERROR
+        }
+        return $seqfile
+        
+    };# exit read_sequence_filename
+    
+    
+    
+    
+    ###   read_weights   ######################################################
+    #
+    # reads the weights stored in proj_file and writes them to the provided
+    # array variable "weight_arrayname"
+    # breaks on first non matching regexp
+    #
+    proc read_weights {proj_file  weight_arrayname} {
+        
+        upvar $weight_arrayname weight 
+        
+        set f_id [open $proj_file r]
+        set the_weights_are_in_the_house 0
+        
+        while { [gets $f_id line] >= 0 } {
+            if {$the_weights_are_in_the_house} {
+                if { ! [ regexp {^([0-9]*)[ \t]+([0-9.]*)$}  $line dummy index val]} {
+                    break
+                }
+                set weight($index) $val
+                
+            } elseif {$line=="WEIGHTS"} {
+                set the_weights_are_in_the_house 1
+            }
+        }
+    };# exit read_weights
+    
+    
+    
+    
+    ###   read_matrix_filenames   #############################################
+    #
+    # reads the filenames of the basepair-probability matrices stored
+    # in proj_file and writes them to the provided array variable ""
+    # array variable "matrix_arrayname"
+    # breaks on first non matching regexp
+    #
+    #
+    proc read_matrix_filenames {proj_file  matrix_arrayname} {
+
+        upvar $matrix_arrayname matrix_fname
+        
+        set f_id [open $proj_file r]
+        set the_matrices_are_in_the_house 0
+
+        while { [gets $f_id line] >= 0 } {
+            if {$the_matrices_are_in_the_house} {
+                if { ! [ regexp {^([0-9]*)[ \t]+(.*)$}  $line dummy index val]} {
+                    break
+                }
+                set matrix_fname($index) $val
+                
+            } elseif {$line=="ABPPMS"} {
+                set the_matrices_are_in_the_house 1
+            }
+        }
+            
+    };# exit read_matrix_filenames
+    
+    
+    
+    
+    ###   read_complete_proj_file   ###########################################
+    #
+    # Core routine for reading
+    #
+    # Reads all entries from the project file
+    # The continual opening and closing of the file in the reused subroutines
+    # maybe somewhat slow but should be cleaner than reinventing the wheel
+    # All read variables are stored as namespace internal variables
+    #
+    # Args:
+    #     proj_file : the file which should be read
+    #
+    #
+    # Returns $num_mat on success, ERROR otherwise
+    #
+    proc read_complete_proj_file {proj_file} {
+         variable debug
+         
+         variable proj_filename
+         variable proj_name
+         variable num_seq 
+         variable method_cmdline
+         variable sequence_file
+         variable matrix_filename
+         variable weight      
+         
+         
+        if { ! [file exists $proj_file]} {
+            puts "ERROR: Project File \"$proj_file\" doesn't exist"
+            return ERROR
+        }
+        
+        
+        set proj_filename $proj_file
+        
+        
+        if {$debug} {
+			puts "DEBUG(cs_proj::read_complete_proj_file) : reading proj_name"
+		}
+        set proj_name [read_proj_name $proj_file]
+        if {$proj_name=="ERROR"} {return ERROR}
+
+        
+        if {$debug} {
+			puts "DEBUG(cs_proj::read_complete_proj_file) : reading method_cmdline"
+		}
+        set method_cmdline [read_method_cmdline $proj_file]
+        if {$method_cmdline=="ERROR"} {return ERROR}
+        
+        
+        if {$debug} {
+			puts "DEBUG(cs_proj::read_complete_proj_file) : reading sequence_file"
+		}
+        set sequence_file [read_sequence_filename $proj_file]
+        if {$method_cmdline=="ERROR"} {return ERROR}
+        
+        
+        
+        if {$debug} {
+			puts "DEBUG(cs_proj::read_complete_proj_file) : reading matrix filenames"
+		}
+        read_matrix_filenames $proj_file  matrix_filename
+        
+        
+        if {$debug} {
+			puts "DEBUG(cs_proj::read_complete_proj_file) : reading sequence weights"
+		}
+        read_weights $proj_file weight
+        
+    
+        ### is everything as expected ?
+        #
+        if {[array size weight] != [array size matrix_filename]} {
+            puts "ERROR: Number of read weights and read matrix filenames differ !"
+            puts "       Maybe your project file \"$proj_file\" is broken ?!"
+            if {$debug} {
+                set header "DEBUG(cs_proj::read_complete_proj_file) : "
+                puts "$header array size weight = [array size weight]"
+                puts "$header array size matrix_filename = [array size matrix_filename]"
+            }
+            return ERROR
+        }
+        if {$debug} {
+			dump_values
+		}
+		
+        set num_seq [array size weight] ;# or [array size matrix_filename]
+        
+        return $num_seq
+        
+    };# exit read_complete_proj_file
+    
+    
+    
+    
+        
+    ###########################################################################
+    #>>>>>>>>>>>>>>>>>>>>>>>                        <<<<<<<<<<<<<<<<<<<<<<<<<<#
+    #>>>>>>>>>>>>>>>>>>>>>>>>>> Write Procedures <<<<<<<<<<<<<<<<<<<<<<<<<<<<<#
+    #>>>>>>>>>>>>>>>>>>>>>>>                      <<<<<<<<<<<<<<<<<<<<<<<<<<<<#
+    ###########################################################################
+    
+    
+    #
+    # All write subprocedures take the id of the already opened proj_file as
+    # arguments and write only one variable to the file
+    #
+    
+    
+    
+    
+    ###   write_version_string   ##############################################
+    #
+    #
+    proc write_version_string {proj_file_id} {
+         variable CS_VERSION
+         
+        puts $proj_file_id "$CS_VERSION"
+    };# exit write_version_string
+    
+    
+    
+    
+    ###   write_proj_name   ###################################################
+    #
+    # Adds a line "PROJECT" as token before the proj_name
+    #
+    #
+    proc write_proj_name {proj_file_id} {
+         variable proj_name
+        
+        puts $proj_file_id "PROJECT"
+        puts $proj_file_id "$proj_name"
+    };# exit write_proj_name
+    
+    
+    
+    
+    ###   write_method_cmdline   ##############################################
+    #
+    # Adds "! " as token to the method_cmdline
+    #
+    #
+    proc write_method_cmdline {proj_file_id}  {
+         variable method_cmdline
+        
+        puts $proj_file_id "! $method_cmdline"
+    };# exit write_method_cmdline
+    
+    
+    
+    
+    ###   write_sequence_file   ###############################################
+    #
+    # Adds a line "SEQUENCES" as token before the proj_name
+    #
+    #
+    proc write_sequence_file {proj_file_id} {
+         variable sequence_file
+        
+        puts $proj_file_id "SEQUENCES"
+        puts $proj_file_id "$sequence_file"
+    };# exit write_sequence_file
+    
+    
+    
+    
+    ###   write_matrix_filename_array   #######################################
+    #
+    # Writes the array containg the filenames of the basepair-probability-matrix
+    # Indices are created with a sorted "array names"
+    # Adds a line "ABPPMS" as token before the proj_name (and only Lord Harry
+    # knows what this exactly means)
+    # Each entry is written to one line in the following format:
+    #   $index      $matrixfilename
+    #
+    #
+    proc write_matrix_filename_array {proj_file_id} {
+         variable matrix_filename
+         
+        puts $proj_file_id "ABPPMS"
+        
+        foreach idx [lsort -dictionary [array names matrix_filename]] {
+            set     entry  "$idx"
+            append  entry  "      "
+            append  entry  "$matrix_filename($idx)"
+            
+            puts $proj_file_id "$entry"
+        }
+    };# exit write_matrix_filename_array
+
+
+
+
+    ###   write_weight_arrayname   ############################################
+    #
+    # Writes the array containg the sequence weights
+    # Indices are created with a sorted "array names"
+    # Adds a line "WEIGHTS" as token before the proj_name 
+    # Each entry is written to one line in the following format:
+    #   $index   $weight
+    #
+    #
+    proc write_weight_arrayname {proj_file_id} {
+         variable weight
+        
+        puts $proj_file_id "WEIGHTS"
+        
+        foreach idx [lsort -dictionary [array names weight]] {
+            set     entry  "$idx"
+            append  entry  "   "
+            append  entry  [expr {double($weight($idx))}]
+            
+            puts $proj_file_id "$entry"
+        }
+    };# exit write_weight_arrayname
+
+
+
+
+    ###   write_complete_proj_file   ##########################################
+    #
+    # Core routine for writing
+    # If a project file name is provided the namespace variable proj_filename
+    # is updated, otherwise the current proj_filename is used
+    # Data integrity/existence is only tested via num_seq and proj_filename
+    #
+    proc write_complete_proj_file { {filename ""} } {
+		 variable debug
+		 
+         variable proj_filename
+         variable proj_name
+         variable num_seq 
+         variable method_cmdline
+         variable sequence_file
+         variable matrix_filename
+         variable weight
+         
+
+        if {$filename!=""} {
+            set proj_filename $filename
+        }
+        if {$debug} {
+			puts "DEBUG(cs_proj::write_complete_proj_file) : writing to $proj_filename"
+		}
+		
+        if {( ! [info exists num_seq] ) || ( ! [info exists proj_filename] )} {
+            puts "ERROR: Got no variables for writing to project file"
+            return ERROR
+        }
+		
+        if {$debug} {
+			dump_values
+		}
+		
+        set f_id [open $proj_filename w+]
+        
+		
+		if {$debug} {
+			puts "DEBUG(cs_proj::write_complete_proj_file) : writing version_string"
+		}
+        write_version_string  $f_id
+        puts -nonewline $f_id "\n"
+        
+		
+		if {$debug} {
+			puts "DEBUG(cs_proj::write_complete_proj_file) : writing proj_name "
+		}
+        write_proj_name  $f_id
+        puts -nonewline $f_id "\n"
+        
+		
+		if {$debug} {
+			puts "DEBUG(cs_proj::write_complete_proj_file) : writing method_cmdline"
+		}
+        write_method_cmdline  $f_id
+        puts -nonewline $f_id "\n"
+        
+		if {$debug} {
+			puts "DEBUG(cs_proj::write_complete_proj_file) : writing sequence_file"
+		}
+        write_sequence_file  $f_id
+        puts -nonewline $f_id "\n"
+        
+		
+		if {$debug} {
+			puts "DEBUG(cs_proj::write_complete_proj_file) : writing matrix_filename_array"
+		}
+        write_matrix_filename_array  $f_id
+        puts -nonewline $f_id "\n"
+        
+		
+		if {$debug} {
+			puts "DEBUG(cs_proj::write_complete_proj_file) : writing weight_arrayname"
+		}
+        write_weight_arrayname  $f_id
+        puts -nonewline $f_id "\n"
+        
+		
+        close $f_id
+        
+    };# exit write_complete_proj_file
+    
+    
+    
+    
+    
+    ###########################################################################
+    #>>>>>>>>>>>>>>>>>>>>>>>>>                       <<<<<<<<<<<<<<<<<<<<<<<<<#
+    #>>>>>>>>>>>>>>>>>>>>>>>>>>>> Misc Procedures <<<<<<<<<<<<<<<<<<<<<<<<<<<<#
+    #>>>>>>>>>>>>>>>>>>>>>>>>>                       <<<<<<<<<<<<<<<<<<<<<<<<<#
+    ###########################################################################
+    
+    
+    
+    
+    ###   init   ##############################################################
+    #
+    # Should be called once for initialization
+    #
+    proc init {} {
+
+		unset_all_values                        ;# paranoia
+		
+        variable proj_filename                  ;# project file name
+        variable proj_name                      ;# project name
+        variable sequence_file                  ;# vienna sequence file
+        variable num_seq                        ;# number of sequences
+        variable method_cmdline                 ;# command line for computing the \
+                                                   basepair-probability matrices
+        variable matrix_filename                ;# filename array of the basepair-\
+                                                   probability matrices
+        variable weight                         ;# array of sequence weights
+
+        variable CS_VERSION      "ConStruct2.1" ;# constant version string
+
+        variable debug            0             ;# boolean
+
+    };# exit init
+        
+    
+    
+    
+    ###   unset_all_values   ##################################################
+    #
+    # Unsets all namespace wide variables
+    #
+    #
+    proc unset_all_values {} {
+         variable proj_filename
+         variable proj_name
+         variable num_seq 
+         variable method_cmdline
+         variable sequence_file
+         variable matrix_filename
+         variable weight
+        
+        if {[info exists proj_filename]}   {unset proj_filename}
+        if {[info exists proj_name]}       {unset proj_name}
+        if {[info exists num_seq]}         {unset num_seq}
+        if {[info exists method_cmdline]}  {unset method_cmdline}
+        if {[info exists sequence_file]}   {unset sequence_file}
+		
+        if {[info exists matrix_filename]} {unset matrix_filename}
+		if {[info exists weight]}          {unset weight}
+		
+		
+    };# exit unset_all_values
+        
+    
+	
+	
+	###   dump_values   #######################################################
+	#
+	# dumps all namespace variables to stdout
+	#
+	proc dump_values {} {
+		variable proj_filename
+        variable proj_name
+        variable num_seq 
+        variable method_cmdline
+        variable sequence_file
+        variable matrix_filename
+        variable weight
+		
+		puts "---   cs_proj::dump_values   ----------------------------------------------"
+		puts "cs_proj::proj_filename = $proj_filename"
+		puts "cs_proj::proj_name = $proj_name"
+		puts "cs_proj::num_seq = $num_seq"
+		puts "cs_proj::method_cmdline = $method_cmdline"
+		puts "cs_proj::sequence_file = $sequence_file"
+		
+		foreach idx [lsort -dictionary [array names matrix_filename]] {
+			puts "cs_proj::matrix_filename($idx) =  $matrix_filename($idx)"
+		}
+		foreach idx [lsort -dictionary [array names weight]] {
+			puts "cs_proj::weight($idx) =   $weight($idx)"
+		}
+		puts "---   end cs_proj::dump_values   ------------------------------------------"
+        
+	};# exit dump_values
+ 
+};# exit namespace eval cs_proj_v2
+
+
+
+
+
+
+
+###############################################################################
+#############################      
+##########                    main                           
+#############################      
+###############################################################################
+
+
+
+if {$argc!=1} {
+    puts "usage:  [info script] <construct v2 project file>"
+    exit
+}
+set fname_proj_old  [lindex $argv 0]
+set    fname_proj_new "[file rootname $fname_proj_old]"
+append fname_proj_new "_v3[file extension $fname_proj_old]"
+
+
+###   read old file
+#
+cs_proj_v2::unset_all_values        ;# paranoia :)
+cs_proj_v2::init    
+if {[cs_proj_v2::read_complete_proj_file $fname_proj_old]=="ERROR"} {
+    puts "ERROR: while reading $fname_proj_old"
+}
+#cs_proj_v2::dump_values
+
+
+###   write new file
+#
+cs_proj::unset_all        ;# paranoia :)
+set cs_proj::proj(version)   $cs_proj::VERSION
+set cs_proj::proj(name)      $cs_proj_v2::proj_name
+set cs_proj::proj(aln_path)  $cs_proj_v2::sequence_file
+set cs_proj::nseq            $cs_proj_v2::num_seq
+for {set n 1} {$n<=$cs_proj::nseq} {incr n} {
+    
+    # get id from bpmat-filename
+    regsub {_ti_pr.dat.*}  [file tail $cs_proj_v2::matrix_filename($n)]  ""  cs_proj::seq_id($n)
+    regsub {_pr.dat.*}     [file tail $cs_proj_v2::matrix_filename($n)]  ""  cs_proj::seq_id($n)
+    
+    set cs_proj::weight($n)  $cs_proj_v2::weight($n)
+    set cs_proj::bpmat($n)   $cs_proj_v2::matrix_filename($n)
+    set cs_proj::foldcmd($n) $cs_proj_v2::method_cmdline
+}
+cs_proj::write $fname_proj_new
+#cs_proj::print_out
+
+puts "successfully converted project [file tail $fname_proj_old] (vers.2) to [file tail $fname_proj_new] (vers.3)"
+exit

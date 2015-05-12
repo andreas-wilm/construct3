@@ -1,0 +1,164 @@
+#!/bin/sh
+# the next line restarts using wish (emacs user:-*-tcl-*- ) \
+exec cs_wish "$0" -- "$@"
+###############################################################################
+
+
+#
+#  CVS $Id: cs_remgaponly_cols,v 1.8 2004-04-30 15:16:29 wilm Exp $    
+#
+
+
+
+
+
+
+
+###   ListGapOnlyColumns   
+#
+# Lookup gap only columns and return then 
+#
+proc ListGapOnlyColumns {seq_array_name} {
+#######################
+    upvar $seq_array_name seq
+    
+    set col2remove {}
+
+    # foreach column
+    for {set col 1} {$col<=$seq(aln_len)} {incr col} {
+        set only_gaps 1
+        
+        # foreach sequence
+        foreach idx [array names seq "nt,*"] {
+            set current_nt [string index $seq($idx) [expr {$col-1}]]
+            if { ! [IsGap $current_nt]} {
+                set only_gaps 0
+                break
+            }
+        }
+        # store columns only consisting of gaps    
+        if {$only_gaps} {
+            lappend col2remove $col
+        }
+    }
+    return $col2remove
+}
+# ListGapOnlyColumns
+
+
+
+###   RemGapOnlyColumns   
+#
+# Remove listed gap only columns
+#
+proc RemGapOnlyColumns {seq_array_name gaponly_cols} {
+#######################
+    upvar $seq_array_name seq
+    
+    set col2remove {}
+
+    # foreach sequence
+    foreach idx [array names seq "nt,*"] {
+
+        set rem_offset 1
+
+        # foreach column
+        foreach col $gaponly_cols {
+            set seq($idx) [string replace $seq($idx) [expr {$col-$rem_offset}] \
+                                                   [expr {$col-$rem_offset}]]
+            incr rem_offset
+        }
+    }
+}
+# RemGapOnlyColumns
+
+
+
+###   Usage   
+#
+#
+proc Usage {} {
+##########
+    
+    puts "Usage: cs_remgaponly_cols -f <FILE> \[other options\]"
+    puts "       will remove columns only consisting of gaps from <FILE>"
+    puts "Options:"
+    puts "   -h :         show this help"
+    puts "   -f <FILE> :  multiple sequence file (any format)"
+    puts "   -o <FILE> :  optional: output file (vienna format)\n"
+
+    exit
+}
+# Usage
+
+
+
+set fname(in)  "EMPTY"
+set fname(out) "EMPTY"
+
+
+#####   parse command line
+#
+# h: help
+# f: sequence file to read
+# o: optional: redirect output to file
+#
+#
+while {[set cl_err [getopt $argv "hf:o:" cl_opt cl_arg]]} {
+    if {$cl_err<0} then {
+        p::error "$cl_arg"
+        Usage
+    } else {
+        switch -exact $cl_opt {
+            h {Usage}
+            f {set fname(in)  "$cl_arg"}
+            o {set fname(out) "$cl_arg"}
+        }
+    }
+}
+
+
+if {$fname(in)=="EMPTY"} {
+    p::error "filename missing"
+    Usage
+}
+
+
+LoadAlignment $fname(in) seq
+
+#DEBUG: Sequence Output
+#for {set i 1} {$i<=$seq(n_seq)} {incr i} {
+#    puts "> $seq(id,$i)"
+#    puts "$seq(nt,$i)\n"
+#}
+
+
+
+set gaponly_cols [ListGapOnlyColumns seq]
+
+if {[llength $gaponly_cols]==0} {
+    puts "no gap-only columns detected"
+} else {
+    RemGapOnlyColumns seq $gaponly_cols
+    
+    if {$fname(out)=="EMPTY"} {
+        set f_id stdout
+    } else {
+        set f_id [open $fname(out) w]
+    }
+    
+    # FIXME allow auto detection  
+    SaveVie seq $f_id
+
+    close $f_id
+}
+
+
+#for {set i 1} {$i<=$seq(n_seq)} {incr i} {
+#    puts "DEBUG: > $seq(id,$i)"
+#    puts "DEBUG: $seq(nt,$i)\n"
+#}
+
+
+
+exit

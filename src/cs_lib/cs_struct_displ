@@ -1,0 +1,235 @@
+#!/bin/sh
+# the next line restarts using wish (emacs user:-*-tcl-*- ) \
+exec cs_wish "$0" -- "$@"
+# "--" bypasses all wish internal options, like visual etc.
+
+
+##############################################################################
+#
+# cs_struct_displ - display structures stored in different formats
+#
+# Copyright (C) 2001-2004 Institute of Physical Biology,
+#                    Heinrich-Heine Universität Düsseldorf, Germany
+#                    <construct@biophys.uni-duesseldorf.de>
+#
+# This file is part of ConStruct.
+#
+# ConStruct is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# ConStruct is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with ConStruct; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+###############################################################################
+
+
+#
+#  CVS $Id: cs_struct_displ,v 1.6 2007-10-22 10:43:23 steger Exp $
+#
+
+
+
+###   Usage
+#
+#
+proc Usage {} {
+	#########
+	puts "usage: [file tail $::argv0] \[options\] \[-f\] <structurefile>"
+    puts "       -h: print this help and exit"
+    puts "       -v: be verbose"
+    puts "       -f <file>: structure file"
+	puts "       -d : display method"
+	puts "            circles   : circles display"
+    puts "            drawstruct: squiggles like display (default)"
+	puts "       -i : forced structure file format"
+	puts "            ct: connect format"
+	puts "            cs: ConStruct consensus format"
+	puts "            \[e\]ps: rnaalifold postscript output"
+    exit
+}
+# Usage
+
+
+
+###   parse command line
+#
+# v: verbose
+# f: file (or last argument on command line)
+# s: display method (drawstruct|circles)
+# i: force input file format (connect:ct|construct consensus:cs)
+#
+set opts(debug)   0
+set opts(verbose) 0
+set fname ""
+set infmt ""
+set displ "circles"
+while {[set err [getopt $argv "hvi:d:f:" opt arg]]} {
+    if {$err<0} then {
+        p::error "$arg"
+		Usage
+		exit
+	} else {
+		 switch -exact $opt {
+			 h {Usage; exit}
+			 v {set opts(verbose) 1}
+			 f {set fname "$arg"}
+			 d {set displ "$arg"}
+			 i {set infmt "$arg"}
+		 }
+	}
+}
+p::be_verbose   $opts(verbose)
+p::enable_debug $opts(debug)
+
+
+# if no explicit file was given take the last command-line arg
+#
+if {! [file exists $fname] && $argc} {
+	set fname [lindex $argv [expr {$argc-1}]]
+}
+if {! [file exists $fname]} {
+    p::error "file missing"
+	Usage
+    exit
+}
+p::verbose "file is $fname"
+
+
+# try to determine input format if not forced and check
+#
+if {$infmt==""} {
+	set infmt [file extension $fname]
+	if {[scan $infmt ".%s" infmt]!=1} {
+		p::error "couldn't determine input file format"
+	}
+}
+if {$infmt!="cs" && $infmt!="ct" && $infmt!="ps" && $infmt!="eps"} {
+	set msg "unknown input file format \"$infmt\""
+	append msg ": must be either cs or ct"
+	p::error $msg
+	Usage
+	exit
+}
+p::verbose "format is $infmt"
+
+
+# load file
+#
+if {$infmt=="cs"} {
+	set result [LoadCsConsensus $fname]
+} elseif {$infmt=="ct"} {
+	set result [LoadConnect $fname]
+} elseif {$infmt=="ps" || $infmt=="eps"} {
+    set fid [open $fname r]
+    set this_nt ""
+    set this_bplist {}
+    while {[gets $fid line]!=-1} {
+        #puts "DEBUG: line \"$line\""
+        # match sequence
+        if {[regexp {^/sequence} $line match]} {
+            while {1} {
+                if {[gets $fid line]==-1} {
+                    puts "ERROR: eof while parsing sequence"
+                    exit -1
+                }
+                if {[string match "* def*" $line]} {
+                    break
+                }
+                append this_nt [string range $line 0 [expr {[string length $line]-2}]]
+            }
+            # now it's save to set up bpprob-list
+            for {set i 1} {$i<=[string length $this_nt]} {incr i} {
+                lappend this_bplist 0
+            }
+        }
+        
+        if {[scan $line "\[%d %d\]" i j]==2} {
+            if {$i>$j} {
+                continue
+            }
+            set this_bplist [lreplace $this_bplist [expr {$i-1}] [expr {$i-1}] $j]
+            set this_bplist [lreplace $this_bplist [expr {$j-1}] [expr {$j-1}] $i]
+        }
+    }
+    close $fid
+    if {[llength $this_bplist]==0} {
+        puts "ERROR: couldn't find basepairing probabilites"
+        exit -1
+    }
+    set this_nt [string map {"_" "-"} $this_nt]
+    #puts stderr "TMPDEBUG: fname=$fname this_nt=$this_nt $this_bplist=$this_bplist"
+    set result [list [file tail $fname] $this_nt $this_bplist]
+}
+set seqid [lindex $result 0]
+if {$seqid=="NOT_FOUND"} {
+	set seqid "[file tail $fname]"
+}
+set seqnt [lindex $result 1]
+set bplist [lindex $result 2]
+p::verbose "seqid ([string length $seqid])=$seqid"
+p::verbose "seqnt ([string length $seqnt])=$seqnt"
+p::verbose "bplist ([llength $bplist])=$bplist"
+# setup bplist
+for {set i 1} {$i<=[string length $seqnt]} {incr i} {
+	set bpp($i,partner) [lindex $bplist [expr {$i-1}]]
+	set bpp($i,prob) 1
+}
+
+
+# display
+#
+if {$displ!="drawstruct" && $displ!="circles"} {
+	p::error "unknown display method \"$displ\": must be either drawstruct or circles"
+	Usage
+	exit
+}
+
+# set  up vars normally created on cs_dp startup
+# but accessed from within the libraries used here:
+set opts(dir,work) [pwd]
+set PS_WIDTH 16    ;# width of print; between 5 and 18 cm
+set opts(print_cmd,grey) "lpr"
+set opts(print_cmd,color) ""
+set opts(print_cmd,screen) "gv -a4 -magstep -1 -"
+set opts(print_cmd,colormode) "color" ;# or gray or mono
+catch {source $tcl_rcFileName}
+wm withdraw .
+
+### drawstruct
+#
+if {$displ=="drawstruct"} {
+	package require DrawStruct
+	if {[DrawStruct::Init]=="ERROR"} {
+		p::error "draws truct library failed"
+		exit
+	}
+
+	set header_l "Drawstruct of $seqid"
+	set proj ""
+	lappend header_l "(created with ConStruct)"
+	DrawStructFrontend bpp $seqnt $header_l $proj
+
+### circles
+#
+} elseif {$displ=="circles"} {
+	package require Circles
+	if {[Circles::Init]=="ERROR"} {
+		p::error "circles library initialization failed"
+		exit
+	}
+
+	set header_1 "Circles of $seqid"
+	set header_2 "(created with ConStruct)"
+	CirclesFrontend bpp $seqid $seqnt "i" $header_1 $header_2
+
+}
+
+p::fixme "catch destroy"

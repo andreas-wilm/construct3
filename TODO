@@ -1,0 +1,40 @@
+See also BUGS
+
+- cs_fold: deactivate folding before "write"-click
+  or set cs_proj::foldcmd(1) beforehand
+
+- Fix Dotplotnumbering
+  AW
+  
+- Dp Mouse Moving
+  AW
+  
+- DrawStruct Mouse Moving
+  AW
+
+- DrawStruct allow mixed lower/upper case
+  AW
+  
+- MIC invalid label after move
+  AW
+
+- Legends for dotplot and structural alignment
+  AW  
+
+- Hide SeqBp on request
+  AW
+
+- Stockholm (W)
+  AW
+
+- Squid?
+  AW
+
+- Fix: project entries must be in same order as in sequence file
+  AW
+
+- cs_fold input:
+  also allow not aligned files
+  read enhanced fasta format: >ID <weight> <temp>
+  AW (Christoph Held Christoph.Held@ruhr-uni-bochum.de)
+

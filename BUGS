@@ -1,0 +1,53 @@
+- Installation "Error in startup script: can't find package drawstructcore"
+  Makefile/configure error: libdrawstruct is missing so-suffix
+  AW 2006-12-18
+
+- sequence weighting is ingnored by mic
+  and somewhere in thermodynamics...
+  AW 2005-11-25
+
+- generating tclIndex and pkgIndex during installation is error-prone
+  AW 2005-11-09
+
+- Pir files are not handled correctly: seqio adds oth
+  AW 2005-10-20
+
+- Circles Plot wm title is broken
+  Use: wm title .icircles "View of Foo"
+  AW 2005-10-19
+
+- Circles Plot line width option is missing
+  Use: foreach lineid [.icircles.canvas find withtag line] {.icircles.canvas itemconfigure $lineid -width 5}
+  AW 2005-10-19
+
+- Dotplot numbering doesn't change according to zoom
+  AW
+
+- 8.4 Port:
+  sometimes cs_fold exec pipe seems broken
+  do a export LD_PRELOAD="/lib/libpthread.so.0"
+  (at least under Debian 3.0)
+  AW
+
+- Moving full sequence with no gaps inside raises segfault
+  in move_update.c:UpdateBp. See comments before free(exclude);
+  Example: move AY280864.1_1417_1439 to left
+	>AJ002384.1_1133_1157 
+	----AGAGCAGCAGGUUAGGAGUGGGUUU----
+	>AY280864.1_1417_1439 
+	----UGAUUAUAUUCUUAGGAAAGGUU------
+	>L08474.1_53_78 
+	--ACGCUACA-UACUUUUAGUGCGCUGAU----
+	>AJ002384.1_2767_2790 
+	----CUUACACUUCCUUUAGGGGCCUAG-----
+	>M18055.1_2095_2118 
+	----GGUAAAAUACCUUAGACAAUUUUU-----
+	>U59483.1_361_386 
+	---CUCUGGACAACUUUAGGUAUAAGUGG----
+	>M18055.1_1565_1589 
+	----UGCCUUGACUGUUAG--CUGUUAGCUG--
+	>AY280864.1_1027_1050 
+	----UGUUGAAGUAGUUAGUCCUGUUUA-----
+	>L08475.1_2722_2745 
+	-----CCAACUGUGUCUUAGUAUGUCUGU----
+  AW

@@ -1,0 +1,60 @@
+#!/bin/sh
+# the next line restarts using wish (emacs user:-*-tcl-*- ) \
+exec wish "$0" "$@"
+
+
+# Copyright (C) 2004 Andreas Wilm <wilm@biophys.uni-duesseldorf.de>
+#
+# This file is free software; as a special exception the author gives
+# unlimited permission to copy and/or distribute it, with or without
+# modifications, as long as this notice is preserved.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+
+# -- csfoldbatch.tcl
+#
+#
+# batch invocation of cs_fold
+#
+
+
+
+set INTERP_NAME "cs_fold"
+set BUTTON_WRITEPROJ ".top.exit.buttons.write"
+set BUTTON_EXEC ".top.exit.buttons.exec"
+
+set cmd "cs_fold &"
+if {[catch {eval exec $cmd} res]} {
+    puts stderr "Upss...result for \"$cmd\" was \"$res\". Skipping"
+    continue
+}
+set interps {}
+while {[lsearch -exact $interps $INTERP_NAME]==-1} {
+    after 50
+    set interps [winfo interps]
+}
+
+
+foreach fname $argv {
+    if {![ file exists $fname]} {
+        puts stderr "Skipping missing file \"$fname\""
+        continue
+    }
+
+    puts ">>> cs_folding $fname"
+    
+    send $INTERP_NAME "set Seq(file) $fname"
+    send $INTERP_NAME "LoadSeq \$WIDGET_SEQ \$WIDGET_OPTS"
+    send $INTERP_NAME "$BUTTON_WRITEPROJ invoke"
+    
+    #send $INTERP_NAME "update"
+    #after 1000
+    #send $INTERP_NAME "$BUTTON_EXEC invoke"
+}
+catch {send $INTERP_NAME "Exit"}
+
+exit
+

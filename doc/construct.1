@@ -1,0 +1,89 @@
+.TH "construct" "l" "3.1" "Andreas Wilm" "construct"
+.SH "NAME"
+ConStruct \- a collection of tools for conserved rna secondary structure prediction and an alignment editing
+.SH "SYNOPSIS"
+\fBcs_fold\fR [\-h] [\-d] [\-v] [\-f \fImsafile\fR] [\-t \fItemp\fR] [\-l \fIlength\fR]
+
+\fBcs_dp\fR [\-h] [\-V] [\-v] [\-d] [\-t] [\-f \fIprojectfile>\fR]
+.SH "DESCRIPTION"
+ConStruct is not a single executable, but a whole set of tools.
+The main scripts are cs_fold and cs_dp.
+.br .br 
+cs_fold is a frontend for folding RNA sequences.
+It reads an multiple sequence alignment file (MSA) and folds each sequence contained
+therein with the chosen method (default RNAfold) and options. cs_fold will create a
+so called project file and basepairing matrices for each sequence including. 
+.br 
+cs_dp reads the project file and displays an alignment editor and a consensus dotplot,
+which comprises all single basepairing matrices superimposed according to the alignment.
+Thus conserved elements can be readily identified and misaligned regions can be easily corrected.
+Once you have a trusted/corrected alignment you can predict consensus structures, which may be
+displayed in a variety of formats.
+
+.br 
+Other included scripts:
+.br 
+\fBcs_struct_displ\fR,
+\fBcs_shift\fR,
+\fBcs_proj_conv\fR
+
+
+.SH "OPTIONS"
+Options for \fBcs_fold\fR
+.TP 
+.B \-h
+print short help and exit
+.TP 
+.B \-d
+enable debugging
+.TP 
+.B \-v
+be verbose
+.TP 
+.B \-f\ <msafile>
+load specified multiple sequence file on startup
+.TP 
+.B \-t\ <temp>
+set default RNAfold temperature
+.TP 
+.B \-l\ <length>
+set Tinoco minimum helix length
+
+
+.PP 
+Options for \fBcs_dp\fR
+.TP 
+.B \-h
+print short help and exit
+.TP 
+.B \-V
+print version and exit
+.TP 
+.B \-v
+be verbose
+.TP 
+.B \-d
+enable debugging
+.TP 
+.B \-t
+do timings
+.TP 
+.B \-f\ <projectfile>
+load specified project\-file on startup
+
+.SH "REFERENCES"
+Please cite
+.br 
+Lueck R., Graef S. and Steger G.
+.br 
+"ConStruct: a tool for thermodynamic controlled prediction of conserved secondary structure."
+.br 
+NAR, 27, pp 4208\-17, 1999
+
+
+.SH "VERSION"
+This man page documents version 3.2 of ConStruct.
+.SH "AUTHORS"
+Rupert Lueck, Jochen Riks, Andreas Wilm, Gerhard Steger
+.SH "BUGS"
+Comments should be sent to construct@biophys.uni\-duesseldorf.de

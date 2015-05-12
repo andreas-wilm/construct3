@@ -1,0 +1,18 @@
+Welcome to ConStruct.
+
+ConStruct is free software. Please see the file COPYING for details.
+For documentation, please see the files in the doc subdirectory.
+For building and installation instructions please see the INSTALL file.
+
+
+The homepage of ConStruct is
+http://www.biophys.uni-duesseldorf.de/local/ConStruct/ConStruct.html
+
+You will find an online-help in the help menu of all ConStruct binaries.
+An uncompleted manual can also be found in the doc directory.
+
+Contact, questions, bug reports:
+    Gerhard Steger <steger@biophys.uni-duesseldorf.de>,
+    Andreas Wilm <wilm@biophys.uni-duesseldorf.de>,
+    or
+    construct@biophys.uni-duesseldorf.de

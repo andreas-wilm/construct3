@@ -1,0 +1,1141 @@
+#!/bin/sh
+# the next line restarts using wish (emacs user:-*-tcl-*- ) \
+exec cs_wish "$0" -- "$@"
+
+
+##############################################################################
+#
+# cs_fold - frontend to create basepairing probability matrices
+#
+# Copyright (C) 2001-2004 Institute of Physical Biology,
+#                    Heinrich-Heine Universität Düsseldorf, Germany
+#                    <construct@biophys.uni-duesseldorf.de>
+#
+# This file is part of ConStruct.
+#
+# ConStruct is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# ConStruct is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with ConStruct; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+###############################################################################
+
+#
+#  CVS $Id: cs_fold,v 1.49 2008-01-13 22:50:54 wilm Exp $    
+#
+
+
+
+###   globals
+#
+#
+
+set FOLD_CMD(rnafold)           "RNAfold -T <TEMP> -p -d 3"
+                                ;# <TEMP> will be replaced>
+set FOLD_CMD(rnaplfold)           "RNAplfold -T <TEMP> -d 3 2>/dev/null"
+                                ;# <TEMP> will be replaced>
+set FOLD_CMD(tinoco)             "tinoco -w -l <LENGTH>"
+                                ;# <LENGTH> will be replaced>
+set CSDP_CMD                    "xterm -e cs_dp -f <PROJFILE>"
+                                ;# <PROJFILE> will be replaced>
+
+
+set FOLD_PID                    -1
+set opt(proceed_with_csdp)      1
+                                ;# proceed after exit with cs_dp is default
+set DEFAULT(temp)               37
+                                ;# can be changed via command line
+set DEFAULT(weight)             1.0
+set DEFAULT(hel_len)            5
+
+set RNAFOLD_TEMP(allowed_min)   4
+set RNAFOLD_TEMP(allowed_max)   90
+# same used for RNAplfold
+
+set NICE_VALUE                  20
+
+set FONT(bold)                  "-adobe-helvetica-bold-r-normal--*-140-0-0-p-0-iso8859-1"
+set FONT(Bold)                  "-adobe-helvetica-bold-r-normal--*-180-0-0-p-0-iso8859-1"
+set FONT(Normal)                "-adobe-helvetica-*-r-normal--*-120-0-0-p-0-iso8859-1"
+
+set TINOCO_HELIX_LENGTH(allowed_min)    1
+set TINOCO_HELIX_LENGTH(allowed_max)    20
+
+set FILE_EXT(bpprob,rnafold,libz) "_pr.dat.Z"
+set FILE_EXT(bpprob,rnafold)      "_pr.dat"
+# set FILE_EXT(bpprob,tinoco)       "_ti_pr.dat"
+# set FILE_EXT(bpprob,tinoco,libz)  "_ti_pr.dat.Z"
+set FILE_EXT(bpprob,tinoco)       "_ti.ps"
+set FILE_EXT(bpprob,tinoco,libz)  "_ti.ps.gz"
+set FILE_EXT(fold,dp)             "_dp.ps"
+set FILE_EXT(fold,dp,libz)        "_dp.ps.gz"
+
+set FILE_EXT(optstruct) ".os"
+set FILE_EXT(proj)      ".proj"
+
+set STATUS "Idle"
+
+set METHOD "rnafold" ;# or tinoco
+set FOLD_OPTIONS "Fold Options"
+
+
+set FOLD_MFE_RE(STRUCT)    "^ *(\[\(\)\.\]+) *"
+set FOLD_MFE_RE(FREQ)      "^ *frequency of mfe structure in ensemble *(\[0-9\.\]+)"
+
+
+
+array set Seq   {}
+                #(n_seq) (file) (id,$i) (nt,$i) (weight,$i) (hel_len,$i) (temp,$i) (proj_file)
+
+array set opts              {}
+set opts(proceed_with_csdp) 0
+
+# see ButtonStatus
+array set STATE_DEPENDENT_BUTTONS {}
+
+set WIDGET_OPTS "SETLATER"
+set WIDGET_SEQ  "SETLATER"
+
+
+###   RnaplfoldIsInstalled
+#
+#
+proc RnaplfoldIsInstalled {} {
+    if {[catch {eval exec "which RNAplfold"} res]} {
+        return 0
+    } else {
+        return 1
+    }
+}
+
+
+###    ExecFold   
+#
+#
+#
+proc ExecFold {} {
+#############
+    global Seq
+    global NICE_VALUE
+    global METHOD
+    global STATUS
+    global FOLD_MFE_RE
+    global opts
+
+    SetCursor busy
+
+    set old_dir  [pwd]
+
+    # create a special fold dir inside seqfile dir
+    # fold sequences there and move them one dir up
+    set now [clock format [clock seconds] -format "%Y%m%d%H%M%S"]
+    set fold_dir [file join [file dirname $Seq(file)] "cs_fold_tmp_[pid]_${now}"]
+    file mkdir $fold_dir
+    cd $fold_dir
+
+
+    # debug
+    #foreach an [lsort -dictionary [array names Seq]] {
+    #    p::fixme "Seq($an)=$Seq($an)"
+    #}
+
+    set log_filename [file tail [GetLogFileName $Seq(file)]]
+    # hack to avoid race condition: see http://mini.net/tcl/open
+    set f_log [open $log_filename {WRONLY CREAT APPEND}]
+
+    set os_filename [file tail [GetOptStructFileName $Seq(file)]]
+    set f_os [open $os_filename {WRONLY CREAT APPEND}]
+
+    for {set i 1}  {$i<=$Seq(n_seq)}  {incr i} {
+        set STATUS "Folding $Seq(id,$i)"
+        update
+
+        set mfe(struct) "NOT PARSED"
+        set mfe(freq)   "NOT PARSED"
+
+        # execute command in a pipe
+        #
+        set cmd "nice -n$NICE_VALUE $cs_proj::foldcmd($i)"
+        set f_pipe [open "|$cmd" r+]
+        fconfigure $f_pipe -buffering line
+
+
+        # enter the current sequence
+        #
+        puts $f_pipe "> $Seq(id,$i)"
+        puts $f_pipe "[Degap $Seq(nt,$i)]"
+        puts $f_pipe "@" ;# quit
+
+        # read from the pipe
+        #
+        set got_struct 0
+        set got_freq 0
+        while {[gets $f_pipe line]>=0} {
+
+            # log the output
+            puts $f_log "$line"
+
+            # match the interesting things
+            if {! $got_struct} {
+	            if {[regexp $FOLD_MFE_RE(STRUCT) $line dummy mfe(struct)]} {
+	            	#puts "got_struct: $mfe(struct)"
+	            	set got_struct 1
+	                continue
+	            }
+            }
+            if { ! $got_freq} {
+            	if {[regexp $FOLD_MFE_RE(FREQ)   $line dummy mfe(freq)]} {
+	            	#puts "got_freq: $mfe(freq)"
+            		set got_freq 1
+	                continue
+	            }
+			}
+
+            # paranoia
+            if {[eof $f_pipe]} {
+                break
+            }
+        }
+        close $f_pipe
+
+        puts $f_os "> $Seq(id,$i)"
+        puts $f_os "[Degap $Seq(nt,$i)]"
+        puts $f_os "$mfe(struct)"
+
+        # try gzipping only when zlib installed and also built into wish
+        if {[GzipIsInstalled] && [LibZ_supported]} {
+            set cmd "nice -n$NICE_VALUE gzip [glob *ps]"
+            # puts "GST: cmd =>${cmd}<"
+            catch {eval exec $cmd} res
+        }
+
+
+        # rename
+        if {$METHOD=="rnafold"} {
+            set ss_ps [glob "*_ss.ps*"]
+            set dp_ps [glob "*_dp.ps*"]
+            # puts "ss_ps =>${ss_ps}<"
+            # puts "dp_ps =>${dp_ps}<"
+
+            regexp {.*_dp\.(ps.*)} $dp_ps all dp_ext
+            regexp {.*_ss\.(ps.*)} $ss_ps all ss_ext
+            # puts "ss_ext =>${ss_ext}<"
+            # puts "dp_ext =>${dp_ext}<"
+            file rename -force $dp_ps [file join ".." "$Seq(id,$i)_dp.$dp_ext"]
+            file rename -force $ss_ps [file join ".." "$Seq(id,$i)_ss.$ss_ext"]
+        } elseif  {$METHOD=="rnaplfold"} {
+            set dp_ps [glob "*_dp.ps*"]
+
+            regexp {.*_dp\.(ps.*)} $dp_ps all dp_ext
+            # puts "ss_ext =>${ss_ext}<"
+            # puts "dp_ext =>${dp_ext}<"
+            file rename -force $dp_ps [file join ".." "$Seq(id,$i)_dp.$dp_ext"]
+            
+        } else {
+            set ti_ps [glob "*_ti.ps*"]
+            # puts "ti_ps =>${ti_ps}<"
+
+            regexp {.*_ti\.(ps.*)} $ti_ps all ti_ext
+            # puts "ti_ext =>${ti_ext}<"
+            # puts "file rename -force $ti_ps [file join ".." "$Seq(id,$i)_ti.$ti_ext"]"
+            file rename -force $ti_ps [file join ".." "$Seq(id,$i)_ti.$ti_ext"]
+        }
+    }
+    close $f_log
+    close $f_os
+
+    file rename -force $log_filename [file join ".." $log_filename]
+    file rename -force $os_filename [file join ".." $os_filename]
+
+    cd $old_dir
+    if {[catch {file delete $fold_dir}]} {
+        p::error "couldn't delete \"$fold_dir\". there might be some unhandled files left"
+    }
+        
+    set STATUS "Sequences folded"
+    update
+
+
+    SetCursor normal
+}
+# ExecFold
+
+
+
+
+
+###   WriteProj   
+#
+# Write a project file (using cs_proj) in the same directory as the sequence
+# file with the same name extension $FILE_EXT(proj)
+#
+#
+proc WriteProj {} {
+##############
+    global Seq
+    global FOLD_CMD
+    global FILE_EXT
+    global STATUS
+    global METHOD
+    global opts
+    
+    # define prob-matrix-file-extension
+    #
+    if {$METHOD=="rnafold"} {
+        if {[GzipIsInstalled] && [LibZ_supported]} {
+            set prob_mat_ext $FILE_EXT(fold,dp,libz)
+        } else {
+            set prob_mat_ext $FILE_EXT(fold,dp)
+        }
+    } elseif  {$METHOD=="rnaplfold"} {
+        if {[GzipIsInstalled] && [LibZ_supported]} {
+            set prob_mat_ext $FILE_EXT(fold,dp,libz)
+        } else {
+            set prob_mat_ext $FILE_EXT(fold,dp)
+        }
+        
+    } else {
+        if {[GzipIsInstalled] && [LibZ_supported]} {
+            set prob_mat_ext $FILE_EXT(bpprob,tinoco,libz)
+        } else {
+            set prob_mat_ext $FILE_EXT(bpprob,tinoco)
+        }
+    }
+
+
+    # define name of project file
+    #
+    set proj_dir       [file dirname $Seq(file)]
+    set proj_tail      "[file rootname [file tail $Seq(file)]]$FILE_EXT(proj)"
+    set Seq(proj_file) [file join $proj_dir $proj_tail]
+
+
+
+	##########   export vars to namespace cs_proj
+	#
+
+    ###   init
+    #
+	cs_proj::unset_all ;# paranoia :)
+    set cs_proj::IMPORT_FROM_CSWISH  0
+
+
+    set cs_proj::proj(version)   $cs_proj::VERSION
+    set cs_proj::proj(name)      [file rootname [file tail $Seq(file)]]
+    # project and alignment are in the same dir, hence tail
+    set cs_proj::proj(aln_path)  [file tail $Seq(file)]
+    set cs_proj::nseq            $Seq(n_seq)
+
+    ###   each sequence
+    #
+    for {set i 1}  {$i<=$Seq(n_seq)}  {incr i} {
+
+        ###   sequence-id
+        #
+        set seq_id $Seq(id,$i)
+
+
+        ###   bpprob-matrix (= cleaned sequence-id + extension)
+        #
+        regsub -all -- { } $Seq(id,$i) "_" prob_matrix
+        append prob_matrix $prob_mat_ext
+
+        ###   weight
+        #
+        set weight  $Seq(weight,$i)
+
+        ###   fold-command
+        #
+        if {$METHOD=="rnafold"} {
+            regsub -- "<TEMP>"   $FOLD_CMD(rnafold) [expr {int($Seq(temp,$i))}] foldcmd
+        } elseif  {$METHOD=="rnaplfold"} {
+            regsub -- "<TEMP>"   $FOLD_CMD(rnaplfold) [expr {int($Seq(temp,$i))}] foldcmd          
+        } else {
+            regsub -- "<LENGTH>" $FOLD_CMD(tinoco)  [expr {int($Seq(hel_len,$i))}] foldcmd
+        }
+
+        set cs_proj::seq_id($i)  $seq_id
+        set cs_proj::bpmat($i)   $prob_matrix
+        set cs_proj::weight($i)  $weight
+        set cs_proj::foldcmd($i) $foldcmd
+		set cs_proj::seqlen($i)      [string length [Degap $Seq(nt,$i)]]
+    }
+
+    cs_proj::write $Seq(proj_file)
+	
+    set level 2
+    ButtonStatus $level
+
+    set STATUS "Project written to $Seq(proj_file)"
+
+}
+# WriteProj
+
+
+
+
+
+###   LoadSeq   
+#
+#   Load a sequence file via c-extension LoadAlignment
+#   According to the number of sequences a table is created that allows to enter
+#   individual weights and fold temperatures for the sequences.
+#   If reload is 1, the old alignment will be reused
+#
+#
+proc LoadSeq {seqfilewidget w {reload 0}} {
+############
+    global FONT
+    global STATUS
+    global Seq
+    global DEFAULT
+    global METHOD
+    global FILE_TYPES
+	 
+    set filename [$seqfilewidget get]
+    if {$filename==""} {
+        if {[info exists Seq(file)]} {
+            set dirname [file dirname $Seq(file)]
+        } else {
+            set dirname [pwd]
+        }
+        set filename [tk_getOpenFile -initialdir $dirname           \
+            -title "Browse sequence files" \
+            -filetypes $FILE_TYPES(seqin)]
+    }
+    if {$filename==""} {
+        return
+    }
+
+    set Seq(file) $filename
+    
+    if { ! [file exists $Seq(file)]} {
+        puts "ERROR: file \"$Seq(file)\" doesn't exist!"
+        return
+    }
+
+    if { ! $reload} {
+        LoadAlignment $Seq(file) Seq
+    }
+
+    #DEBUG: Sequence Output
+    #for {set i 1} {$i<=$Seq(n_seq)} {incr i} {
+    #    puts "> $Seq(id,$i)"
+    #    puts "$Seq(nt,$i)\n"
+    #}
+
+
+    set NumRowsPerCol 5
+    set NumCols [expr {$Seq(n_seq)/$NumRowsPerCol}]
+    if {$NumCols!=[expr {1. * $Seq(n_seq)/$NumRowsPerCol}]} {
+        incr NumCols
+    }
+
+    set fontWidth  [expr {-1+int([font measure $FONT(Normal) M         ])}]
+    set fontHeight [expr {-1+    [font metrics $FONT(Normal) -linespace] }]
+
+
+    # Outline of table: 2 colums with 'NumRowsPerCol' (=10) lines each are visible;
+    #
+    #      colOffset entryOffset  entryWidth
+    #       ||         |        |       ||    |    |   || ...
+    #       ^          ^        ^       ^
+    #       |          |        |       |
+    #       |          |        |       begin of 2nd column
+    #       |          |        begin of entry
+    #       |          begin of seqname
+    #       begin of 1st column
+
+    set entryWidth  4
+    set entryOffset 0
+    for {set i 1} {$i<=$Seq(n_seq)} {incr i} {
+        set entryOffset [expr ($entryOffset > [string length $Seq(id,$i)]) ? \
+                               $entryOffset : [string length $Seq(id,$i)]]
+    }
+    set colWidth  [expr {$entryOffset+$entryWidth*2}]
+    set colOffset  3
+    if {[winfo exists $w.w]} {
+        destroy $w.w
+    }
+    frame     $w.w   -bd 2
+    set c     $w.w.c
+    canvas    $c  -relief sunken -borderwidth 1        \
+                  -xscrollcommand "$c.hscroll set"    \
+                  -yscrollcommand "$c.vscroll set"    \
+                  -width  [expr {($colOffset+$colWidth*2       )*$fontWidth}]p    \
+                  -height [expr {        1.5*($NumRowsPerCol+1)*$fontHeight}]p    \
+                  -scrollregion [list 0p 0p                    \
+                                [expr {($colOffset+$colWidth*$NumCols)*$fontWidth}]p    \
+                                [expr {        1.5*($NumRowsPerCol+1)*$fontHeight}]p]
+    scrollbar $c.hscroll -command "$c xview" -orient horiz
+    scrollbar $c.vscroll -command "$c yview"
+
+
+    for {set j 1} {$j<=$NumCols} {incr j} {
+        set jmax [expr ($j*$NumRowsPerCol > $Seq(n_seq)) ? $Seq(n_seq) : $j*$NumRowsPerCol]
+
+
+        for {set i [expr {($j-1)*$NumRowsPerCol+1}]} {$i<=$jmax} {incr i} {
+
+            if { ! $reload} {
+                set Seq(weight,$i)  $DEFAULT(weight)
+                set Seq(temp,$i)    $DEFAULT(temp)
+                set Seq(hel_len,$i) $DEFAULT(hel_len)
+             }
+
+            ###   Weight + (Temperature or Length)
+            #
+            frame $c.seq$i
+            label $c.seq$i.id     -font $FONT(Normal) -text "$Seq(id,$i)"
+
+            entry $c.seq$i.weight -relief sunken -width $entryWidth -textvariable Seq(weight,$i)
+
+            if {$METHOD=="rnafold"} {
+                entry $c.seq$i.opt  -relief sunken -width $entryWidth -textvariable Seq(temp,$i)
+                bind  $c.seq$i.opt  <Return> "CheckTemp $c.seq$i.opt $i"
+                bind  $c.seq$i.opt  <Leave> "CheckTemp $c.seq$i.opt $i"
+
+            } elseif {$METHOD=="rnaplfold"} {
+                entry $c.seq$i.opt  -relief sunken -width $entryWidth -textvariable Seq(temp,$i)
+                bind  $c.seq$i.opt  <Return> "CheckTemp $c.seq$i.opt $i"
+                bind  $c.seq$i.opt  <Leave> "CheckTemp $c.seq$i.opt $i"
+                
+            } else {
+
+                entry $c.seq$i.opt   -relief sunken -width $entryWidth -textvariable Seq(hel_len,$i)
+                bind  $c.seq$i.opt  <Return> "CheckLength $c.seq$i.opt $i"
+                bind  $c.seq$i.opt  <Leave> "CheckLength $c.seq$i.opt $i"
+            }
+            pack  $c.seq$i.id $c.seq$i.weight $c.seq$i.opt -in $c.seq$i -side left
+
+            $c create window [expr {($colOffset*2+$entryOffset+$colWidth*($j-1))*$fontWidth}]p \
+                             [expr {1.5*($i-($j-1)*$NumRowsPerCol)*$fontHeight}]p \
+                              -window $c.seq$i -anchor ne
+
+            bind $c.seq$i.weight <Return> "CheckWeight $c.seq$i.weight $i"
+            bind $c.seq$i.weight <Leave> "CheckWeight $c.seq$i.weight $i"
+        }
+    }
+    grid $c -in $w.w  -row 0 -column 0 -sticky news
+    grid rowconfig    $c 0 -weight 1 -minsize [expr {1.5*($NumRowsPerCol+1)*$fontHeight}]p
+    grid columnconfig $c 0 -weight 1 -minsize [expr {($colOffset+$colWidth*2)*$fontWidth}]p
+    if {$NumRowsPerCol>$NumRowsPerCol} {
+        grid $c.vscroll -row 0 -column 1 -sticky news
+    }
+    if {$NumCols>2} {
+        grid $c.hscroll -row 1 -column 0 -sticky news
+    }
+    grid $w.w -in $w -sticky news
+
+    set level 2
+    ButtonStatus $level
+
+    set STATUS "Sequences loaded"
+}
+# LoadSeq
+
+
+
+
+
+###   CheckWeight   
+#
+# A valid weight is above 0 and has only two decimals
+# Used for weighting of sequences in cs_dp
+#
+proc CheckWeight {w i} {
+################
+   global Seq
+
+    set weight [expr {abs(int(100*[$w get]))/100.}]
+    if {$weight > 1.} {
+        set weight 1.
+    }
+    set Seq(weight,$i) $weight
+}
+# CheckWeight
+
+
+
+
+###   CheckTemp   
+#
+# A valid temp is below 0 and has only two decimals
+# Used for RNAfold and RNAplfold
+#
+proc CheckTemp {w i} {
+##############
+    global Seq
+    global RNAFOLD_TEMP
+
+    set temp [expr {int([$w get])}]
+    if {$temp < $RNAFOLD_TEMP(allowed_min)} {
+        set temp $RNAFOLD_TEMP(allowed_min)
+    }
+    if {$temp > $RNAFOLD_TEMP(allowed_max)} {
+        set temp $RNAFOLD_TEMP(allowed_max)
+    }
+    set Seq(temp,$i) $temp
+}
+# CheckWeight
+
+
+
+
+###   CheckLength   
+#
+# A valid helixlength for tinoco is 1 < l <= 20
+# Used for tinco
+#
+proc CheckLength {w i} {
+################
+    global Seq
+    global TINOCO_HELIX_LENGTH
+
+    set length [expr {int([$w get])}]
+    if {$length < $TINOCO_HELIX_LENGTH(allowed_min)} {
+        set length $TINOCO_HELIX_LENGTH(allowed_min)
+    }
+    if {$length > $TINOCO_HELIX_LENGTH(allowed_max)} {
+        set length $TINOCO_HELIX_LENGTH(allowed_max)
+    }
+    set Seq(hel_len,$i) $length
+}
+# CheckWeight
+
+
+
+
+
+###   BrowseFileName   
+#
+# Choose a sequence file (*.vie) interactively.
+# The directory name is extracted from Seq(file)
+# The selected file has to exist; otherwise nothing should happen.
+#
+#
+proc BrowseFileName {entryW} {
+###################
+    global Seq
+    global FILE_TYPES
+
+    set dirname [file dirname $Seq(file)]
+    if {$dirname == ""} {
+        set dirname [pwd]
+    }
+    set filename [tk_getOpenFile -initialdir $dirname           \
+                                 -title "Browse sequence files" \
+                                 -filetypes $FILE_TYPES(seqin)]
+
+
+    $entryW delete 0 end
+    if {$filename == ""} {
+        set filename $Seq(file)
+    } else {
+        set level 1
+        ButtonStatus $level
+    }
+    $entryW insert 0 [format "%s" $filename]
+    $entryW xview end
+
+
+    return $filename
+}
+# BrowseFileName
+
+
+
+
+
+###   Exit   
+#
+#
+proc Exit {} {
+#########
+    global Seq
+    global CSDP_CMD
+    global opts
+
+
+    # check if cs_dp should be started
+    #
+    if {[info exists Seq(proj_file)] && ($opts(proceed_with_csdp)=="1")} {
+        regsub -- "<PROJFILE>" $CSDP_CMD $Seq(proj_file) cmd
+        append cmd " &"
+        catch {eval exec $cmd} result
+        puts "$result: $cmd"
+    }
+    destroy .
+    exit
+}
+# Exit
+
+
+
+
+###   ButtonStatus   
+#
+# Modify state of buttons STATE_DEPENDENT_BUTTONS
+#
+# level
+#       1: seqfile given (LoadSeq activated)
+#       2: seq loaded (LoadSeq+Write activated)
+#       3: all active
+#
+proc ButtonStatus {level} {
+#################
+    global STATE_DEPENDENT_BUTTONS
+
+    foreach b $STATE_DEPENDENT_BUTTONS($level) {
+        $b config -state active
+    }
+}
+# ButtonStatus
+
+
+
+
+
+###   CreateGui   
+#
+#
+proc CreateGui {} {
+##############
+    global FONT
+    global METHOD
+    global FOLD_OPTIONS
+    global STATE_DEPENDENT_BUTTONS
+    global WIDGET_OPTS
+    global WIDGET_SEQ
+
+    set          w ".top"
+    toplevel     $w
+    wm title     $w "cs_fold"
+    wm iconname  $w "cs_fold"
+    wm withdraw  .
+    wm geometry  $w +175+50
+    wm protocol  $w WM_DELETE_WINDOW Exit
+
+    set w_seq    "$w.seq"
+    set w_opts   "$w.opts"
+    set WIDGET_OPTS ".top.opts"
+
+    set w_exit   "$w.exit"
+    set w_fold   "$w.fold"
+    set w_status "$w.status"
+
+
+    #############
+    ### Menu ###
+    #############
+    #
+    set    w_menu $w.menu
+    frame $w_menu -relief raised -bd 2
+    grid  $w_menu -row 0 -sticky ew
+    set col 0
+
+    #  options
+    #
+    set m $w_menu.options.menu
+    #
+    menubutton $w_menu.options  -text "Options"  -menu $m
+    menu $m
+
+    $m add checkbutton -label "Proceed after exit with cs_dp" \
+                       -variable opts(proceed_with_csdp) -onvalue 1 -offvalue 0
+    $m add command -label "Source existant project" -command LoadExistantProj
+    #
+    grid $w_menu.options   -column $col -row 0 -sticky e
+    incr col
+    grid columnconfigure $w_menu 3 -weight 1
+
+    #  help
+    #
+    set m $w_menu.help.menu
+    menubutton $w_menu.help  -text "Help"  -menu $m
+    menu $m
+    $m add command  -label "Manual"  -command {ShowHelpHint}
+    #
+    grid $w_menu.help   -column $col -row 0 -sticky e
+    grid columnconfigure $w_menu 3 -weight 1
+    incr col
+
+
+
+    #############
+    ### Title ###
+    #############
+    #
+    frame     $w.title     -bd 2 -relief raised
+       label  $w.title.txt -font $FONT(Bold) \
+                           -text "Calculate Basepairing Matrices for ConStruct"
+       grid   $w.title.txt -row 0 -column 0
+    grid      $w.title     -ipady 5 -ipadx 5 -sticky new
+
+
+    #####################
+    ### File Handling ###
+    #####################
+    #
+    frame       $w_seq       -relief raised -bd 2
+        label   $w_seq.label   -text "Sequence file : " -font $FONT(Bold) -background SkyBlue1
+        entry   $w_seq.entry   -relief sunken -width 40 -textvariable Seq(file)
+                $w_seq.entry xview end
+        set WIDGET_SEQ $w_seq.entry
+        bind    $w_seq.entry <Return> "LoadSeq $WIDGET_SEQ $WIDGET_OPTS"
+        button  $w_seq.load  -text    "Load Seq." -command "LoadSeq $WIDGET_SEQ $WIDGET_OPTS"
+        
+        grid    $w_seq.label  -column 0 -row 0 -sticky w
+        grid    $w_seq.entry  -column 1 -row 0 -sticky e
+        grid    $w_seq.load   -column 2 -row 0 -sticky e
+
+        grid    $w_seq        -ipady 5 -sticky news
+
+        grid columnconfig   $w_seq 0 -weight 1;    # -pad .1c
+        grid columnconfig   $w_seq 2 -weight 1;    # -pad .1c
+        grid columnconfig   $w_seq 1 -weight 2;    # -pad .1c
+     
+    ############
+    ### Fold ###
+    ############
+
+    frame       $w_fold            -relief raised -bd 2
+       frame    $w_fold.label0        -bd 2
+          label $w_fold.label0.txt    -text "Method" -font $FONT(Bold) -background SkyBlue1
+          grid  $w_fold.label0.txt    -sticky news -pady 10
+       grid     $w_fold.label0        -sticky news
+
+       frame           $w_fold.pgm      -bd 2
+          radiobutton  $w_fold.pgm.rnafold -text "RNAfold" -variable METHOD \
+                                        -relief flat -value rnafold
+
+          frame        $w_fold.pgm.blank1 -bd 2
+             label     $w_fold.pgm.blank1.name -text "  "
+             grid      $w_fold.pgm.blank1.name -column 0 -row 0 -sticky w
+    
+          radiobutton  $w_fold.pgm.rnaplfold -text "RNAplfold" -variable METHOD \
+                                        -relief flat -value rnaplfold
+
+          frame        $w_fold.pgm.blank2 -bd 2
+             label     $w_fold.pgm.blank2.name -text "  "
+             grid      $w_fold.pgm.blank2.name -column 0 -row 0 -sticky w
+
+          radiobutton  $w_fold.pgm.tinoco -text "tinoco" -variable METHOD \
+                                        -relief flat -value tinoco
+        
+          grid         $w_fold.pgm.rnafold -column 0 -row 0 -sticky ew
+          grid columnconfig $w_fold.pgm.rnafold 0 -minsize 4c
+          grid         $w_fold.pgm.blank1 -column 1 -row 0 -sticky ew
+          grid columnconfig $w_fold.pgm.blank1 0 -minsize 2c
+          grid         $w_fold.pgm.rnaplfold -column 2 -row 0 -sticky ew
+          grid columnconfig $w_fold.pgm.rnaplfold 0 -minsize 4c
+          grid         $w_fold.pgm.blank2 -column 3 -row 0 -sticky ew
+          grid columnconfig $w_fold.pgm.blank2 0 -minsize 2c
+          grid         $w_fold.pgm.tinoco -column 4 -row 0 -sticky ew
+          grid columnconfig $w_fold.pgm.tinoco 0 -minsize 4c
+    
+       grid            $w_fold.pgm        -sticky news
+    grid      $w_fold            -sticky news -ipady 5
+
+    if {![RnaplfoldIsInstalled]} {
+        $w_fold.pgm.rnaplfold config -state disabled
+    }
+
+    
+    if {$METHOD=="rnafold"} {
+        $w_fold.pgm.rnafold configure -indicatoron 1
+    } elseif {$METHOD=="rnaplfold"} {
+        $w_fold.pgm.rnaplfold configure -indicatoron 1
+    } else {
+        $w_fold.pgm.tinoco configure -indicatoron 1
+    }
+
+
+    ###############
+    ### Options ###
+    ###############
+    #
+    frame        $w_opts           -relief raised -bd 2
+       frame     $w_opts.label     -bd 2
+          label  $w_opts.label.txt -textvariable FOLD_OPTIONS \
+                                   -font $FONT(Bold) -background SkyBlue1
+          grid   $w_opts.label.txt -sticky news -pady 10
+       grid      $w_opts.label     -sticky news
+    grid         $w_opts           -sticky news
+    #
+    if {$METHOD=="rnafold"} {
+        set FOLD_OPTIONS "Fold Options (weight and temperature)"
+    } else {
+        set FOLD_OPTIONS "Fold Options (weight and helix-length)"
+    }
+    
+
+    
+    ############
+    ### Exit ###
+    ############
+    #
+    set writeproj_ballon_text "Write project file to disk"
+    set execfold_ballon_text  "Execute folding method for each sequence"
+
+
+    frame  $w_exit  -bd 2
+        frame  $w_exit.buttons
+        button  $w_exit.buttons.write \
+            -text "Write Project File"  -command "WriteProj"  -state disabled
+            BalloonHelp::set_balloon $w_exit.buttons.write "$writeproj_ballon_text"
+            lappend STATE_DEPENDENT_BUTTONS(1) $w_exit.buttons.write
+            lappend STATE_DEPENDENT_BUTTONS(2) $w_exit.buttons.write
+                        
+            button $w_exit.buttons.exec  -text "Fold"  -command "ExecFold"  -state disabled
+            BalloonHelp::set_balloon $w_exit.buttons.exec "$execfold_ballon_text"
+            lappend STATE_DEPENDENT_BUTTONS(2) $w_exit.buttons.exec
+
+            button      $w_exit.buttons.exit  -text "Exit"  -command  Exit
+
+
+            # bind all <Control-x> Exit
+            grid    $w_exit.buttons.write   -column 0 -row 0 -sticky w  -padx 20
+            grid    $w_exit.buttons.exec    -column 1 -row 0 -sticky ew -padx 20
+            grid    $w_exit.buttons.exit    -column 2 -row 0 -sticky e  -padx 20
+        grid  $w_exit.buttons  -sticky news -pady 20
+    grid  $w_exit  -sticky news
+
+
+    frame  $w_status  -relief sunken -bd 2
+        label $w_status.statusLabel -textvariable STATUS
+        grid  $w_status.statusLabel
+    grid  $w_status  -sticky news
+
+    raise $w
+}
+# CreateGui
+
+
+
+
+###   MethodChange   
+#
+#
+proc MethodChange {name index op} {
+#################
+    global METHOD
+    global FOLD_OPTIONS
+    global Seq
+    global WIDGET_OPTS
+    global WIDGET_SEQ
+    
+    
+    if {$METHOD=="rnafold"} {
+        set FOLD_OPTIONS "Fold Options (weight and temperature)"
+        
+    } elseif {$METHOD=="rnaplfold"} {
+        set FOLD_OPTIONS "Fold Options (weight and temperature)"
+    } else {
+        set FOLD_OPTIONS "Fold Options (weight and helix-length)"
+    }
+
+    set reload 1
+    LoadSeq $WIDGET_SEQ $WIDGET_OPTS $reload
+}
+# MethodChange
+
+
+
+
+###   Usage   
+#
+#
+proc Usage {} {
+##########
+    global RNAFOLD_TEMP
+    global TINOCO_HELIX_LENGTH
+
+    puts "Usage: cs_fold \[OPTIONS\]"
+    puts " Options:"
+    puts "   -h          show this help"
+    puts "   -d          debugging"
+	puts "   -v          be verbose"
+    puts "   -f <FILE>   multiple sequence file (any format)"
+    puts -nonewline "   -t <INT>    set default RNAfold/RNAplfold temperature"
+    puts " ($RNAFOLD_TEMP(allowed_min) < # <= $RNAFOLD_TEMP(allowed_max))"
+    puts -nonewline "   -l <INT>     set default tinoco helix length"
+    puts " ($TINOCO_HELIX_LENGTH(allowed_min) < # <= $TINOCO_HELIX_LENGTH(allowed_max))"
+
+    exit
+}
+# Usage
+
+
+
+
+###   LoadExistantProj   
+#
+# does only work with native v3 projects !
+# since folding binaries names have changed
+#
+proc LoadExistantProj {} {
+#####################
+    global Seq
+    global METHOD
+    global FOLD_CMD
+    global FILE_TYPES
+    global STATUS
+    global WIDGET_SEQ
+    global WIDGET_OPTS
+
+    
+    set filename [tk_getOpenFile -title "Browse project files" \
+                         -filetypes $FILE_TYPES(proj)]
+    if {$filename==""} {
+        return
+    }
+
+
+    cs_proj::unset_all ;# paranoia :)
+    set cs_proj::EXPORT_2_CSWISH  0
+	
+    set result [cs_proj::read $filename 0]
+    if {$result!="OK"} {
+        set msg "Failed to read project file $filename: $result"
+        tk_messageBox -message $msg -type ok -title "Error"
+        cs_proj::unset_all ;# paranoia :)
+        return
+    }
+
+    set Seq(proj_file) $filename
+    set Seq(file)      $cs_proj::proj(aln_path)
+    set Seq(n_seq)     $cs_proj::nseq
+
+    # find the folding method from an arbitrary command
+    #
+    set ident(rnafold)    [lindex [split $FOLD_CMD(rnafold)   " "] 0]
+    set ident(rnaplfold)  [lindex [split $FOLD_CMD(rnaplfold) " "] 0]
+    set ident(tinoco)     [lindex [split $FOLD_CMD(tinoco)    " "] 0]
+    set old_proj_fold_cmd [lindex [split $cs_proj::foldcmd(1) " "] 0]
+
+    if {$old_proj_fold_cmd==$ident(rnafold)} {
+        set local_method "rnafold"
+    } elseif {$old_proj_fold_cmd==$ident(rnaplfold)} {
+        set local_method "rnaplfold"
+        
+    } elseif {$old_proj_fold_cmd==$ident(tinoco)} {
+        set local_method "tinoco"
+    } else {
+        set msg "Couldn't determine fold command...aborting"
+        tk_messageBox -message $msg -type ok -title "Error"
+        cs_proj::unset_all ;# paranoia :)
+        return
+    }
+
+    LoadSeq $WIDGET_SEQ $WIDGET_OPTS
+
+    ###   each sequence
+    #
+    for {set i 1}  {$i<=$cs_proj::nseq}  {incr i} {
+
+        set Seq(id,$i)     $cs_proj::seq_id($i)
+        set Seq(weight,$i) $cs_proj::weight($i)
+
+        if {$local_method=="rnafold" || $local_method=="rnaplfold"} {
+            set Seq(temp,$i) [lindex [split $cs_proj::foldcmd($i) " "] 2]
+        } else {
+            set Seq(temp,$i) [lindex [split $cs_proj::foldcmd($i) " "] 2]
+        }
+    }
+
+    set METHOD $local_method
+
+    set STATUS "Project $Seq(proj_file) sourced"
+
+    set level 2
+    ButtonStatus $level
+
+}
+# LoadExistantProj
+
+
+
+
+###   main   
+
+
+
+
+#####   parse command line
+#
+# h: help
+# f: sequence file
+# l: default tinoco minimum helix length
+# t: default RNAfold temperature
+#
+#
+set opts(debug)   0
+set opts(verbose) 0
+set opts(batch_exec) 0
+while {[set cl_err [getopt $argv "hdvbf:l:t:" cl_opt cl_arg]]} {
+    if {$cl_err<0} then {
+        p::error "$cl_arg"
+        Usage
+    } else {
+        switch -exact $cl_opt {
+            b {
+                set opts(batch_exec) 1
+            }
+            h {Usage}
+            f {set Seq(file) "$cl_arg"}
+            l {
+                set DEFAULT(hel_len) "$cl_arg"
+                set METHOD            "tinoco"
+            }
+            t {
+                set DEFAULT(temp) "$cl_arg"
+                set METHOD        "rnafold"
+            }
+			v {set opts(verbose)   1}
+            d {set opts(debug)     1}
+        }
+    }
+}
+p::be_verbose   $opts(verbose)
+p::enable_debug $opts(debug)
+
+
+#p::fixme "folding before writing project not possible (to fix: setup cs_proj directly to allow folding before writing project)"
+
+package require BalloonHelp
+
+
+CreateGui
+
+
+trace add variable METHOD write MethodChange
+
+
+
+if {[info exists Seq(file)]} {
+    if {$Seq(file)!=""} {
+        LoadSeq $WIDGET_SEQ $WIDGET_OPTS
+
+        if {$opts(batch_exec)==1} {
+            # added for non-interactive processing
+            # best run on fake x server
+            set BUTTON_WRITEPROJ ".top.exit.buttons.write"
+            set BUTTON_EXEC ".top.exit.buttons.exec"
+            $BUTTON_WRITEPROJ invoke
+            update
+            after 100
+            $BUTTON_EXEC invoke
+            Exit
+        }
+    }
+}

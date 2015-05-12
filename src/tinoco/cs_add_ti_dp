@@ -1,0 +1,244 @@
+#!/bin/sh
+#\
+exec tclsh "$0" "$@"
+
+################################################################################
+#
+# This program reads two ConStruct project files,
+# which have to be based on the same multiple sequence file, 
+# but one is based on RNAfold and the other on tinoco calculations.
+# Equivalent matrices from both projects are weighted and summed up;
+# the new matrices are written in a format readable by ConStruct.
+# A corresponding project file is also created.
+#
+# $ add_ti_dp -r dummy_r.proj -t dummy_t.proj -w .6
+#
+# => RNAfold results (from dummy_r.proj) are multiplied by 0.6;
+#    Tinoco  results (from dummy_t.proj) are multiplied by 0.4;
+#    individual matrices are summed up and written to *_ti_dp.ps.gz;
+#    a project file `dummy_r_dp_ti.proj' is created
+#
+################################################################################
+
+package require cmdline
+
+#############
+# read proj file
+# returns list of matrix files
+# modifies globals:
+#   foldcmd:    with cmd==1 it is assumed that 
+#                   foldcmd is a non-empty string,
+#                   which is modified and written to projFile
+#   projFile:   contents of projFile is stored for writing 
+#                   a new projFile with modified 
+#                   lines `bpmat' and `foldcmd'
+#
+proc readProj {filename cmd} {
+#############
+	global projFile
+    global foldcmd
+    global weight
+
+    set projFile ""
+    set ID [open $filename r]
+	    while {[gets $ID line]>-1} {
+	        if {[string first "    bpmat:   " $line]==0} {
+	        #                  0123456789 123
+	            set bpmat [string range $line 13 end]
+                lappend matrixfiles $bpmat
+                set len [string length $bpmat]
+                set len [expr {$len-10}]; # _ti.ps.gz = 9 chars
+                set bpmat [string range $bpmat 0 $len]
+                if {$cmd==1} {
+                    append projFile "    bpmat:   ${bpmat}_ti_dp.ps.gz\n"
+                }
+	        } elseif {[string first "    foldcmd: " $line]==0} {
+                set dummy [string range $line 13 end]
+                if {$cmd==1} {
+                    set string "$weight*($foldcmd) + (1.-$weight)*($dummy)"
+                    append projFile "    foldcmd: $string\n"
+                } else {
+                    set foldcmd $dummy
+                }
+            } else {
+                if {$cmd==1} {
+                    append projFile "$line\n"
+                }
+            }
+	    }
+	close $ID
+    return $matrixfiles
+}
+
+###################
+# read matrix file (ps file)
+# store ps header (up to data) in newPShead
+# store data in prob($ext,$i,$j)
+#
+proc readMatrixfile {filename ext} {
+###################
+    global prob
+    global newPShead
+
+    set fid [open ${filename}_${ext}.ps r]
+        set read 0
+        set newPShead ""
+        # puts "PS $ext READ"
+        while {!$read && [gets $fid line]>-1} {
+            if {$line=="%data starts here"} {
+                set read 1
+            }
+            append newPShead "$line\n"
+        }
+        while {$read && [gets $fid line]>-1} {
+            if {[scan $line "%d %d %f %s" i j p box]>-1} {
+                if {$box=="ubox"} {
+                    set prob(${ext},$i,$j) [expr $p*$p]
+                    # puts "$i $j $p"
+                } else {
+                    set read 0
+                }
+            } else {
+                set read 0
+            }
+        }
+    close $fid
+}
+
+############
+### MAIN ###
+############
+
+set version    "0.0"
+set debug      0
+set dpFilename "dummy_dp.proj"
+set tiFilename "dummy_ti.proj"
+set weight     0.5
+set optlist [list [list v           0               "version"] \
+                  [list d.secret    0               "debug information"] \
+                  [list r.arg       $dpFilename     "filename of RNAfold project"] \
+                  [list t.arg       $tiFilename     "filename of tinoco project"] \
+                  [list w.arg       $weight         "weight of RNAfold data"] \
+            ]
+set str_usage ": adds tinoco plus RNAfold data\n\n[::cmdline::getArgv0] \[-h\] \[-v\] -w <relative weight of RNAfold data> -r <filename *_dp.proj> -t <filename *_ti.proj>\n"
+
+if {[llength $argv]==0} {
+    puts "[::cmdline::usage $optlist $str_usage]"; exit
+}
+
+set lopts [::cmdline::getoptions argv $optlist $str_usage]
+
+foreach {opt value} $lopts {
+    switch -exact -- $opt {
+        ?       -
+        help    {if {$value==1} {puts "[::cmdline::usage $optlist $str_usage]"; exit}}
+        v       {if {$value==1} {puts "[::cmdline::getArgv0] version $version"; exit}}
+        d       {set debug       $value}
+        r       {set dpFilename  $value}
+        t       {set tiFilename  $value}
+        w       {set weight      $value}
+        default {puts "Strange things do happen: $opt $value"}
+    }
+}
+
+if {$debug} {
+    puts "dpFilename = >${dpFilename}<"
+    puts "tiFilename = >${tiFilename}<"
+    puts "weight     = >${weight}<"
+}
+
+# read proj files to get names of matrix file names
+set dpMatrixfiles [readProj $dpFilename 0]
+set tiMatrixfiles [readProj $tiFilename 1]
+
+# check for identity of tinoco and RNAfold matrix file names
+# create list of names without ``extension''
+for {set i 0} {$i<[llength $tiMatrixfiles]} {incr i} {
+    set ti [lindex $tiMatrixfiles $i]
+    set ti [string range $ti 0 [expr [string last "_ti.ps.gz" $ti]-1]]
+    set dp [lindex $dpMatrixfiles $i]
+    set dp [string range $dp 0 [expr [string last "_dp.ps.gz" $dp]-1]]
+    if {$ti!=$dp} {
+        puts "ERROR: Uncompatible project files"
+        puts [lindex $tiMatrixfiles $i]
+        puts [lindex $dpMatrixfiles $i]
+        exit
+    }
+    lappend list_matrices $ti
+}
+
+# unzip all matrix files
+foreach file $list_matrices {
+    set ti "${file}_ti.ps.gz"
+    set doit "eval exec gunzip $ti"
+    # puts $doit
+    if {[catch $doit fehler]!=0} {puts "ERROR during gunzip of $ti:\n$fehler\n"; exit}
+    set dp "${file}_dp.ps.gz"
+    set doit "eval exec gunzip $dp"
+    # puts $doit
+    if {[catch $doit fehler]!=0} {puts "ERROR during gunzip of $dp:\n$fehler\n"; exit}
+}
+
+# Read values (i j prob) from equivalent matrix files
+# Combine values according to $weight
+foreach file $list_matrices {
+    set prob(1) 15.
+    unset prob
+    readMatrixfile $file ti
+    readMatrixfile $file dp
+
+    # puts "Prob combine"
+    # puts "============"
+    # certain i,j combinations have not to be present in both files
+    #   thus, first check the tinoco data
+    foreach index [array names prob "ti,*"] {
+        # puts $index
+        set ij [string range $index 3 end]
+        if {[array names prob "dp,$ij"]=={}} {
+            set prob(new,$ij) [expr {(1.-$weight)*$prob(ti,$ij)}]
+        } else {
+            set prob(new,$ij) [expr {(1.-$weight)*$prob(ti,$ij)+$weight*$prob(dp,$ij)}]
+            # array unset prob(dp,$ij); # Befehl funzt nicht :-((
+            set prob(dp,$ij) -1.
+        }
+    }
+    #   check for remaining RNAfold data
+    foreach index [array names prob "dp,*"] {
+        # puts "prob($index) = $prob($index)"
+         # if notwendig da unset nicht funktioniert
+         if {$prob($index)>0.} {
+            set ij [string range $index 3 end]
+            set prob(new,$ij) [expr {$weight*$prob(dp,$ij)}]
+        }
+    }
+    # create new matrix file
+    set fid [open ${file}_ti_dp.ps w]
+        puts $fid $newPShead
+        foreach index [array names prob "new,*"] {
+            set l_index [split $index ","]
+            # puts "NEW $index => $l_index $prob($index)"
+            puts $fid "[lindex $l_index 1] [lindex $l_index 2] [expr {sqrt($prob($index))}] ubox"
+        }
+        puts $fid "showpage\nend\n%%EOF"
+    close $fid
+}
+
+# zip all matrix files
+foreach file $list_matrices {
+    set ti "${file}_ti.ps"
+    set doit "eval exec gzip -9 $ti"
+    # puts $doit
+    if {[catch $doit fehler]!=0} {puts "ERROR during gzip of $ti:\n$fehler\n"; exit}
+    set dp "${file}_dp.ps"
+    set doit "eval exec gzip -9 $dp"
+    # puts $doit
+    if {[catch $doit fehler]!=0} {puts "ERROR during gzip of $dp:\n$fehler\n"; exit}
+    set dp "${file}_ti_dp.ps"
+    set doit "eval exec gzip -9 -f $dp"
+    # puts $doit
+    if {[catch $doit fehler]!=0} {puts "ERROR during gzip of $dp:\n$fehler\n"; exit}
+}
+
+set fid [open [file rootname $dpFilename]_ti_dp.proj w]
+    puts $fid $projFile
+close $fid

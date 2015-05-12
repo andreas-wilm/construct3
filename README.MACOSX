@@ -1,0 +1,4 @@
+install X (included in 10.3)
+install fink: http://fink.sourceforge.net/
+install macosdev: Mac OS X Developer Tools for <10.3 or Xcode for>10.2
+(apt-get fink-commander) gcc, 

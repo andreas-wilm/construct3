@@ -1,0 +1,22 @@
+ConStruct is developed in the Institute of Biophysics,
+                   Heinrich-Heine-University Düsseldorf
+
+Authors of ConStruct.
+See also the files THANKS and ChangeLog.
+
+
+- Rupert Lück 
+  initially developed ConStruct. (1993-1997)
+
+- Gerhard Steger <steger@biophys.uni-duesseldorf.de>
+  fixed many bugs, added many new features. (1997-2007)
+
+- Jochen Riks 
+  Added support for suboptimal structure prediction,
+  Shannon statistics and frontends to Tabaska's bmatch and imatch. (1999-2000)
+
+- Andreas Wilm <wilm@biophys.uni-duesseldorf.de> 
+  started a complete code rewrite (2002-2007)
+
+- Konny Linnenbrink <linnenbr@biophys.uni-duesseldorf.de>
+  added Minialignment and paned alignment window (2007)

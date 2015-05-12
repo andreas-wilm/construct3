@@ -1,0 +1,123 @@
+#!/bin/sh
+# the next line restarts using wish (emacs user:-*-tcl-*- ) \
+exec cs_wish "$0" -- "$@"
+
+
+##############################################################################
+# 
+# cs_shift - compute cs-shift between two alignments
+#            that is the avg. number of move operations in ConStruct
+#            to transform a predicted alignment into a trusted one
+#          
+#
+# Copyright (C) 2001-2004 Institute of Physical Biology,
+#                    Heinrich-Heine Universität Düsseldorf, Germany
+#                    <construct@biophys.uni-duesseldorf.de>
+#
+# This file is part of ConStruct.
+# 
+# ConStruct is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# ConStruct is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with ConStruct; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+# 
+###############################################################################
+
+
+#
+#  CVS $Id: cs_shift,v 1.7 2004-05-25 13:29:06 wilm Exp $    
+#
+
+
+###   Usage   
+#
+#
+proc Usage {} {
+    p::fixme "fix me"
+
+
+    puts "Usage: cs_fold \[OPTIONS\]"
+    puts " Options:"
+    puts "   -h          show this help"
+    puts "   -t <FILE>   trusted alignment file"
+    puts "   -p <FILE>   predicted alignment file"
+    puts "   -m <FILE>   pairmask file"
+    puts "   -v          be verbose"
+    puts "   -v          debugging"
+
+    exit
+}
+# Usage
+
+
+
+###   main   
+
+
+set f_aln(trust) ""
+set f_aln(pred)  ""
+set f_mask       ""
+
+set opts(verbose) 0
+set opts(debug) 0
+
+
+#####   parse command line
+#
+# h: help
+# t: trusted alignment file
+# p: predicted alignment file
+#
+#
+while {[set cl_err [getopt $argv "hvdt:p:m:" cl_opt cl_arg]]} {
+    if {$cl_err<0} then {
+        p::error "$cl_arg"
+        Usage
+    } else {
+        switch -exact $cl_opt {
+            h {Usage}
+            t {set f_aln(trust)  "$cl_arg"}
+            p {set f_aln(pred)   "$cl_arg"}
+            m {set f_mask        "$cl_arg"}
+            v {set opts(verbose)   1}
+            d {set opts(debug)     1}
+        }
+    }
+}
+
+if {[string length $f_aln(trust)]==0 || [string length $f_aln(pred)]==0} {
+    p::error "predicted or trusted alignment missing"
+    exit    
+}
+if {![file exists $f_aln(trust)]} {
+    p::error "file \"$f_aln(trust)\" doesn't exist"
+    exit
+}
+if {![file exists $f_aln(pred)]} {
+    p::error "file \"$f_aln(pred)\" doesn't exist"
+    exit
+}
+
+if {$f_mask!=""} {
+    if {![file exists $f_mask]} {
+        p::warn "file \"$f_mask\" doesn't exist...Ignoring mask"
+        
+    } else {
+        p::fixme "Implement read mask"
+    }
+}
+
+set avg_score [CsShiftScore $f_aln(trust) $f_aln(pred)]
+puts "average shift = [format "%.2f" $avg_score]"
+
+
+exit

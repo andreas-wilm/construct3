@@ -1,0 +1,61 @@
+#!/bin/sh
+# the next line restarts using wish (emacs user:-*-tcl-*- ) \
+exec wish "$0" "$@"
+
+
+# Copyright (C) 2004 Andreas Wilm <wilm@biophys.uni-duesseldorf.de>
+#
+# This file is free software; as a special exception the author gives
+# unlimited permission to copy and/or distribute it, with or without
+# modifications, as long as this notice is preserved.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+
+# -- csdpbatch.tcl
+#
+#
+# batch invocation of cs_dp
+#
+
+
+
+set INTERP_NAME "cs_dp"
+#set BUTTON_WRITEPROJ ".top.exit.buttons.write"
+
+set cmd "cs_dp &"
+if {[catch {eval exec $cmd} res]} {
+    puts stderr "Upss...result for \"$cmd\" was \"$res\". Skipping"
+    continue
+}
+set interps {}
+while {[lsearch -exact $interps $INTERP_NAME]==-1} {
+    after 50
+    set interps [winfo interps]
+}
+
+
+
+
+send $INTERP_NAME "set org_print \$opts(print_cmd,screen)"
+
+foreach fname $argv {
+    if {![ file exists $fname]} {
+        puts stderr "Skipping missing file \"$fname\""
+        continue
+    }
+    send $INTERP_NAME "set opts(print_cmd,screen) \"cat > $fname.ps\""
+
+    puts ">>> cs_dp'ing $fname"
+    
+    send $INTERP_NAME "LoadProject $fname"
+    send $INTERP_NAME "PrintDotplot screen"
+    
+}
+send $INTERP_NAME "set opts(print_cmd,screen) \$org_print"
+catch {send $INTERP_NAME "exit"}
+
+exit
+
